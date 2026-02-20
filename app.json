@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Girl Safety App",
+    "slug": "girl-safety-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#E91E63",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.girlsafety.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Girl Safety App needs your location to share with emergency contacts during emergencies.",
+        "NSLocationAlwaysUsageDescription": "Girl Safety App needs your location for live tracking during emergencies."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E91E63"
+      },
+      "package": "com.girlsafety.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "SEND_SMS",
+        "CALL_PHONE",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Girl Safety App needs your location to share with emergency contacts during emergencies."
+        }
+      ],
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}
