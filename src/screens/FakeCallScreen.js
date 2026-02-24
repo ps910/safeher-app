@@ -14,6 +14,7 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
 
 const PRESET_CALLERS = [
@@ -37,6 +38,7 @@ const FakeCallScreen = ({ navigation }) => {
   const [selectedCaller, setSelectedCaller] = useState(PRESET_CALLERS[0]);
   const [selectedDelay, setSelectedDelay] = useState(0);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isIncoming, setIsIncoming] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [countdown, setCountdown] = useState(null);
   const [customModalVisible, setCustomModalVisible] = useState(false);
@@ -117,6 +119,7 @@ const FakeCallScreen = ({ navigation }) => {
     ).start();
 
     setIsCallActive(false);
+    setIsIncoming(true);
     slideAnim.setValue(0); // Show incoming screen
   };
 
@@ -126,6 +129,7 @@ const FakeCallScreen = ({ navigation }) => {
 
   const answerCall = () => {
     Vibration.cancel();
+    setIsIncoming(false);
     setIsCallActive(true);
     setCallDuration(0);
   };
@@ -133,6 +137,7 @@ const FakeCallScreen = ({ navigation }) => {
   const endCall = () => {
     Vibration.cancel();
     setIsCallActive(false);
+    setIsIncoming(false);
     setCallDuration(0);
     slideAnim.setValue(300);
     setCountdown(null);
@@ -157,7 +162,7 @@ const FakeCallScreen = ({ navigation }) => {
   };
 
   // Incoming Call / Active Call Full Screen
-  if (slideAnim._value === 0 || isCallActive || countdown === 0) {
+  if (isIncoming || isCallActive) {
     if (isCallActive) {
       // Active call screen
       return (
@@ -251,8 +256,8 @@ const FakeCallScreen = ({ navigation }) => {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtn}>← Back</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>📞 Fake Call</Text>
         <View style={{ width: 50 }} />
@@ -433,24 +438,25 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: COLORS.secondary,
-    paddingHorizontal: SIZES.md,
-    paddingTop: SIZES.xl + 10,
-    paddingBottom: SIZES.md,
+    paddingHorizontal: 16,
+    paddingTop: 48,
+    paddingBottom: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottomLeftRadius: SIZES.radiusLg,
-    borderBottomRightRadius: SIZES.radiusLg,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   backBtn: {
-    color: COLORS.white,
-    fontSize: SIZES.body,
-    fontWeight: '600',
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
   },
   headerTitle: {
     color: COLORS.white,
-    fontSize: SIZES.h3,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   content: {
     flex: 1,

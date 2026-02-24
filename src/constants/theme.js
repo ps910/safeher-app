@@ -1,9 +1,10 @@
 /**
  * App Theme - Colors, Fonts & Styling Constants
+ * Girl Safety App — Modern, clean, empowering design system
  */
 
 export const COLORS = {
-  // Primary palette - calming & empowering
+  // Primary palette - empowering pink/magenta
   primary: '#E91E63',        // Pink - primary brand
   primaryDark: '#C2185B',    // Dark pink
   primaryLight: '#F8BBD0',   // Light pink
@@ -18,14 +19,16 @@ export const COLORS = {
   successDark: '#00C853',
   warning: '#FFD600',        // Yellow - caution
   warningDark: '#FFC400',
+  info: '#2196F3',           // Blue - informational
 
   // Neutrals
   white: '#FFFFFF',
-  background: '#FFF0F5',     // Lavender blush
+  surface: '#FFFFFF',          // Surface/card color
+  background: '#FEF0F5',     // Soft lavender blush
   card: '#FFFFFF',
-  text: '#2D2D2D',
-  textSecondary: '#666666',
-  textLight: '#999999',
+  text: '#1A1A2E',
+  textSecondary: '#555770',
+  textLight: '#9E9EB8',
   border: '#F0E0E8',
   shadow: '#00000020',
   overlay: 'rgba(0,0,0,0.5)',
@@ -35,6 +38,15 @@ export const COLORS = {
   gradientSOS: ['#FF1744', '#D50000'],
   gradientPurple: ['#7C4DFF', '#4A148C'],
   gradientSafe: ['#00E676', '#00C853'],
+
+  // Category colors
+  physical: '#1565C0',
+  digital: '#7B1FA2',
+  dating: '#C62828',
+  home: '#4527A0',
+  workplace: '#00695C',
+  emergency: '#E65100',
+  camera: '#37474F',
 };
 
 export const FONTS = {

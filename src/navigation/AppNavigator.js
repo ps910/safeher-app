@@ -1,87 +1,86 @@
 /**
- * App Navigator - Bottom tab navigation + stack navigation
+ * App Navigator - Bottom Tabs + Stack screens for all features
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
+import { COLORS } from '../constants/theme';
+import { useEmergency } from '../context/EmergencyContext';
 
-// Screens
 import HomeScreen from '../screens/HomeScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import LocationScreen from '../screens/LocationScreen';
-import FakeCallScreen from '../screens/FakeCallScreen';
 import SafetyTipsScreen from '../screens/SafetyTipsScreen';
+import FakeCallScreen from '../screens/FakeCallScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import SelfDefenseScreen from '../screens/SelfDefenseScreen';
+import NearbyHelpScreen from '../screens/NearbyHelpScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import EvidenceVaultScreen from '../screens/EvidenceVaultScreen';
+import GuardianModeScreen from '../screens/GuardianModeScreen';
+import JourneyTrackerScreen from '../screens/JourneyTrackerScreen';
+import IncidentReportScreen from '../screens/IncidentReportScreen';
+import HiddenCameraScreen from '../screens/HiddenCameraScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const TabIcon = ({ icon, label, focused }) => (
-  <View style={styles.tabItem}>
-    <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>
-      {icon}
-    </Text>
-    <Text
-      style={[styles.tabLabel, focused && styles.tabLabelActive]}
-      numberOfLines={1}
-    >
-      {label}
-    </Text>
-  </View>
-);
-
-const TabNavigator = () => {
-  return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarStyle: styles.tabBar,
-      }}
-    >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="🏠" label="Home" focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Contacts"
-        component={ContactsScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="👥" label="Contacts" focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Location"
-        component={LocationScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="📍" label="Location" focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="SafetyTips"
-        component={SafetyTipsScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="📖" label="Tips" focused={focused} />
-          ),
-        }}
-      />
-    </Tab.Navigator>
-  );
+const getTabIcon = (routeName, focused) => {
+  const icons = {
+    Home: focused ? 'shield-checkmark' : 'shield-checkmark-outline',
+    Contacts: focused ? 'people' : 'people-outline',
+    Location: focused ? 'location' : 'location-outline',
+    Tips: focused ? 'book' : 'book-outline',
+  };
+  return icons[routeName] || 'ellipse';
 };
 
-const AppNavigator = () => {
+function TabNavigator() {
+  const { isSOSActive, stealthMode } = useEmergency();
+
+  // In stealth mode change labels to be innocuous
+  const homeLabel = stealthMode ? 'Calculator' : 'Home';
+
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarIcon: ({ focused, color, size }) => (
+          <Ionicons name={getTabIcon(route.name, focused)} size={size} color={color} />
+        ),
+        tabBarActiveTintColor: isSOSActive ? COLORS.danger : COLORS.primary,
+        tabBarInactiveTintColor: COLORS.textLight,
+        tabBarStyle: {
+          backgroundColor: COLORS.surface,
+          borderTopWidth: 0,
+          borderTopColor: 'transparent',
+          height: Platform.OS === 'ios' ? 88 : 68,
+          paddingBottom: Platform.OS === 'ios' ? 22 : 10,
+          paddingTop: 10,
+          elevation: 24,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.12,
+          shadowRadius: 10,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
+          letterSpacing: 0.2,
+        },
+      })}
+    >
+      <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: homeLabel }} />
+      <Tab.Screen name="Contacts" component={ContactsScreen} options={{ tabBarLabel: 'Contacts' }} />
+      <Tab.Screen name="Location" component={LocationScreen} options={{ tabBarLabel: 'Location' }} />
+      <Tab.Screen name="Tips" component={SafetyTipsScreen} options={{ tabBarLabel: 'Tips' }} />
+    </Tab.Navigator>
+  );
+}
+
+export default function AppNavigator() {
   return (
     <Stack.Navigator
       screenOptions={{
@@ -92,45 +91,14 @@ const AppNavigator = () => {
       <Stack.Screen name="MainTabs" component={TabNavigator} />
       <Stack.Screen name="FakeCall" component={FakeCallScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="SelfDefense" component={SelfDefenseScreen} />
+      <Stack.Screen name="NearbyHelp" component={NearbyHelpScreen} />
+      <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="EvidenceVault" component={EvidenceVaultScreen} />
+      <Stack.Screen name="GuardianMode" component={GuardianModeScreen} />
+      <Stack.Screen name="JourneyTracker" component={JourneyTrackerScreen} />
+      <Stack.Screen name="IncidentReport" component={IncidentReportScreen} />
+      <Stack.Screen name="HiddenCamera" component={HiddenCameraScreen} />
     </Stack.Navigator>
   );
-};
-
-const styles = StyleSheet.create({
-  tabBar: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 16,
-    height: 70,
-    borderRadius: 20,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 0,
-    ...SHADOWS.large,
-    paddingBottom: 0,
-  },
-  tabItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 8,
-  },
-  tabIcon: {
-    fontSize: 24,
-    opacity: 0.5,
-  },
-  tabIconActive: {
-    opacity: 1,
-    fontSize: 26,
-  },
-  tabLabel: {
-    fontSize: 10,
-    color: COLORS.textLight,
-    marginTop: 2,
-  },
-  tabLabelActive: {
-    color: COLORS.primary,
-    fontWeight: 'bold',
-  },
-});
-
-export default AppNavigator;
+}

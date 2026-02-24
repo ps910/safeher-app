@@ -13,17 +13,25 @@ import {
   Modal,
   StatusBar,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
 import { useEmergency } from '../context/EmergencyContext';
 import { formatPhoneNumber, makePhoneCall, sendSMS } from '../utils/helpers';
 
+const TIER_INFO = {
+  1: { label: 'Tier 1 — Inner Circle', emoji: '🔴', color: '#FF1744', desc: 'Gets live audio stream + auto call during SOS' },
+  2: { label: 'Tier 2 — Trusted', emoji: '🟠', color: '#FF6D00', desc: 'Gets SMS + static location during SOS' },
+  3: { label: 'Tier 3 — Authorities', emoji: '🔵', color: '#2962FF', desc: 'Gets automated alert dispatch' },
+};
+
 const ContactsScreen = ({ navigation }) => {
-  const { emergencyContacts, addContact, removeContact } = useEmergency();
+  const { emergencyContacts, addContact, removeContact, updateContact } = useEmergency();
   const [modalVisible, setModalVisible] = useState(false);
   const [newContact, setNewContact] = useState({
     name: '',
     phone: '',
     relation: '',
+    tier: 1,
   });
 
   const handleAddContact = async () => {
@@ -37,7 +45,7 @@ const ContactsScreen = ({ navigation }) => {
     }
 
     await addContact(newContact);
-    setNewContact({ name: '', phone: '', relation: '' });
+    setNewContact({ name: '', phone: '', relation: '', tier: 1 });
     setModalVisible(false);
   };
 
@@ -56,12 +64,21 @@ const ContactsScreen = ({ navigation }) => {
     );
   };
 
-  const ContactCard = ({ contact }) => (
+  const ContactCard = ({ contact }) => {
+    const tier = TIER_INFO[contact.tier || 1];
+    return (
     <View style={[styles.contactCard, SHADOWS.small]}>
-      <View style={styles.contactAvatar}>
-        <Text style={styles.avatarText}>
-          {contact.name.charAt(0).toUpperCase()}
-        </Text>
+      <View style={styles.cardTop}>
+        <View style={styles.contactAvatar}>
+          <Text style={styles.avatarText}>
+            {contact.name.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+        <View style={[styles.tierBadge, { backgroundColor: tier.color + '20' }]}>
+          <Text style={[styles.tierBadgeText, { color: tier.color }]}>
+            {tier.emoji} {tier.label}
+          </Text>
+        </View>
       </View>
       <View style={styles.contactInfo}>
         <Text style={styles.contactName}>{contact.name}</Text>
@@ -95,7 +112,8 @@ const ContactsScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -103,8 +121,8 @@ const ContactsScreen = ({ navigation }) => {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtn}>← Back</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency Contacts</Text>
         <TouchableOpacity onPress={() => setModalVisible(true)}>
@@ -211,12 +229,35 @@ const ContactsScreen = ({ navigation }) => {
               }
             />
 
+            <Text style={styles.inputLabel}>Alert Tier *</Text>
+            <View style={styles.tierSelector}>
+              {[1, 2, 3].map((t) => {
+                const info = TIER_INFO[t];
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[
+                      styles.tierOption,
+                      newContact.tier === t && { backgroundColor: info.color + '20', borderColor: info.color },
+                    ]}
+                    onPress={() => setNewContact({ ...newContact, tier: t })}
+                  >
+                    <Text style={styles.tierEmoji}>{info.emoji}</Text>
+                    <Text style={[styles.tierLabel, newContact.tier === t && { color: info.color, fontWeight: '700' }]}>
+                      Tier {t}
+                    </Text>
+                    <Text style={styles.tierDesc} numberOfLines={2}>{info.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.cancelBtn}
                 onPress={() => {
                   setModalVisible(false);
-                  setNewContact({ name: '', phone: '', relation: '' });
+                  setNewContact({ name: '', phone: '', relation: '', tier: 1 });
                 }}
               >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -252,24 +293,25 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: SIZES.md,
-    paddingTop: SIZES.xl + 10,
-    paddingBottom: SIZES.md,
+    paddingHorizontal: 16,
+    paddingTop: 48,
+    paddingBottom: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottomLeftRadius: SIZES.radiusLg,
-    borderBottomRightRadius: SIZES.radiusLg,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   backBtn: {
-    color: COLORS.white,
-    fontSize: SIZES.body,
-    fontWeight: '600',
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
   },
   headerTitle: {
     color: COLORS.white,
-    fontSize: SIZES.h3,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   addBtn: {
     color: COLORS.white,
@@ -475,6 +517,49 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: SIZES.body,
     fontWeight: 'bold',
+  },
+  cardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SIZES.sm,
+  },
+  tierBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  tierBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  tierSelector: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: SIZES.md,
+  },
+  tierOption: {
+    flex: 1,
+    padding: 10,
+    borderRadius: SIZES.radiusMd,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  tierEmoji: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  tierLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  tierDesc: {
+    fontSize: 9,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 2,
   },
   fab: {
     position: 'absolute',

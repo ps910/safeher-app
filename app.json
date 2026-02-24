@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "Girl Safety App",
+    "name": "SafeHer",
     "slug": "girl-safety-app",
-    "version": "1.0.0",
+    "version": "4.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "backgroundColor": "#E91E63",
+      "image": "./assets/splash.png",
+      "backgroundColor": "#0A1628",
       "resizeMode": "contain"
     },
     "assetBundlePatterns": [
@@ -23,24 +24,52 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E91E63"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A1628"
       },
       "package": "com.girlsafety.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "SEND_SMS",
         "CALL_PHONE",
         "VIBRATE",
+        "RECORD_AUDIO",
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Girl Safety App needs your location to share with emergency contacts during emergencies."
+          "locationWhenInUsePermission": "Girl Safety App needs your location to share with emergency contacts during emergencies.",
+          "locationAlwaysAndWhenInUsePermission": "Girl Safety App needs background location for live tracking during emergencies."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Girl Safety App needs microphone access to record audio evidence during emergencies."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Girl Safety App needs camera access for evidence capture."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Girl Safety App uses Face ID to securely unlock your safety features."
         }
       ],
       "expo-asset",
