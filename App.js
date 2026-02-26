@@ -1,17 +1,12 @@
 /**
- * Girl Safety App v4.0 — Next-Gen Women's Safety Application
+ * Girl Safety App v4.3 — Next-Gen Women's Safety Application
  * AI-Powered distress detection, evidence vault, journey tracking,
  * predictive anomaly detection, offline SOS, and more.
+ * 
+ * v4.3: Lazy-loaded navigator, disabled New Architecture, crash diagnostics
  */
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import AppNavigator from './src/navigation/AppNavigator';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { EmergencyProvider, useEmergency } from './src/context/EmergencyContext';
-import { AuthProvider, useAuth } from './src/context/AuthContext';
-import AuthScreen from './src/screens/AuthScreen';
-import { sendSOSToContacts } from './src/utils/helpers';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 
 // ── Error Boundary — prevents white-screen crashes in production ──
 class ErrorBoundary extends React.Component {
@@ -31,7 +26,7 @@ class ErrorBoundary extends React.Component {
         <View style={ebStyles.container}>
           <Text style={ebStyles.icon}>⚠️</Text>
           <Text style={ebStyles.title}>Something went wrong</Text>
-          <Text style={ebStyles.subtitle}>The app encountered an error</Text>
+          <Text style={ebStyles.subtitle}>{String(this.state.error?.message || 'Unknown error')}</Text>
           <TouchableOpacity
             style={ebStyles.btn}
             onPress={() => this.setState({ hasError: false, error: null })}
@@ -54,10 +49,126 @@ const ebStyles = StyleSheet.create({
   btnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });
 
-// ── Main App Content ──
-function AppInner() {
+// ── Boot loader — loads all modules dynamically for crash safety ──
+function AppBootstrap() {
+  const [phase, setPhase] = useState('loading');
+  const [error, setError] = useState(null);
+  const [modules, setModules] = useState(null);
+
+  useEffect(() => {
+    loadModules();
+  }, []);
+
+  const loadModules = async () => {
+    try {
+      setPhase('Loading core...');
+      const navModule = await import('@react-navigation/native');
+      const safeAreaModule = await import('react-native-safe-area-context');
+
+      setPhase('Loading auth...');
+      const authCtxModule = await import('./src/context/AuthContext');
+      const emergencyCtxModule = await import('./src/context/EmergencyContext');
+      const authScreenModule = await import('./src/screens/AuthScreen');
+
+      setPhase('Loading helpers...');
+      const helpersModule = await import('./src/utils/helpers');
+
+      setPhase('Loading navigator...');
+      const navigatorModule = await import('./src/navigation/AppNavigator');
+
+      setModules({
+        NavigationContainer: navModule.NavigationContainer,
+        SafeAreaProvider: safeAreaModule.SafeAreaProvider,
+        AuthProvider: authCtxModule.AuthProvider,
+        useAuth: authCtxModule.useAuth,
+        EmergencyProvider: emergencyCtxModule.EmergencyProvider,
+        useEmergency: emergencyCtxModule.useEmergency,
+        AuthScreen: authScreenModule.default,
+        sendSOSToContacts: helpersModule.sendSOSToContacts,
+        AppNavigator: navigatorModule.default,
+      });
+      setPhase('ready');
+    } catch (e) {
+      console.error('Module load error:', e);
+      setError(`Failed at: ${phase}\n\n${e.message}`);
+      setPhase('error');
+    }
+  };
+
+  if (phase === 'error') {
+    return (
+      <ScrollView contentContainerStyle={diagStyles.container}>
+        <Text style={diagStyles.icon}>🔧</Text>
+        <Text style={diagStyles.title}>SafeHer Diagnostic</Text>
+        <Text style={diagStyles.errorText}>{error}</Text>
+        <TouchableOpacity style={diagStyles.btn} onPress={() => { setError(null); setPhase('loading'); loadModules(); }}>
+          <Text style={diagStyles.btnText}>Retry</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  if (phase !== 'ready' || !modules) {
+    return (
+      <View style={loadStyles.container}>
+        <ActivityIndicator size="large" color="#E91E63" />
+        <Text style={loadStyles.text}>{phase}</Text>
+      </View>
+    );
+  }
+
+  return <AppWithModules modules={modules} />;
+}
+
+// ── Main App Content (only rendered after all modules load) ──
+function AppWithModules({ modules }) {
+  const { SafeAreaProvider, AuthProvider, EmergencyProvider } = modules;
+
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <EmergencyProvider>
+          <AppInner modules={modules} />
+        </EmergencyProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+}
+
+function AppInner({ modules }) {
+  const { NavigationContainer, AuthScreen, AppNavigator, useAuth, useEmergency, sendSOSToContacts } = modules;
   const { isAuthenticated, isLoading } = useAuth();
   const emergency = useEmergency();
+
+  // Initialize services when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      initServices();
+    }
+  }, [isAuthenticated]);
+
+  const initServices = async () => {
+    try {
+      const { default: OfflineLocationService } = await import('./src/services/OfflineLocationService');
+      const { SessionsDB, UserDB, DatabaseUtils } = await import('./src/services/Database');
+      const { default: CloudSyncService } = await import('./src/services/CloudSyncService');
+
+      // Start session + warm DB cache
+      await SessionsDB.start();
+      await DatabaseUtils.warmCache();
+
+      // Init cloud sync with device ID
+      const deviceId = await UserDB.getDeviceId();
+      await CloudSyncService.init(deviceId);
+
+      // Start offline location service
+      await OfflineLocationService.init();
+
+      console.log('[App] ✅ All services initialized');
+    } catch (e) {
+      console.log('Service init error (non-fatal):', e);
+    }
+  };
 
   const handleDuress = () => {
     try {
@@ -74,7 +185,6 @@ function AppInner() {
     }
   };
 
-  // Show loading spinner while auth state is being loaded from storage
   if (isLoading) {
     return (
       <View style={loadStyles.container}>
@@ -95,6 +205,15 @@ function AppInner() {
   );
 }
 
+const diagStyles = StyleSheet.create({
+  container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF0F5', padding: 30 },
+  icon: { fontSize: 60, marginBottom: 16 },
+  title: { fontSize: 22, fontWeight: '800', color: '#C2185B', marginBottom: 16 },
+  errorText: { fontSize: 13, color: '#333', marginBottom: 24, textAlign: 'left', fontFamily: 'monospace', backgroundColor: '#FFF', padding: 16, borderRadius: 8, width: '100%' },
+  btn: { backgroundColor: '#E91E63', borderRadius: 12, paddingHorizontal: 30, paddingVertical: 14 },
+  btnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+});
+
 const loadStyles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FEF0F5' },
   text: { fontSize: 16, color: '#C2185B', marginTop: 16, fontWeight: '600' },
@@ -103,13 +222,7 @@ const loadStyles = StyleSheet.create({
 const App = () => {
   return (
     <ErrorBoundary>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <EmergencyProvider>
-            <AppInner />
-          </EmergencyProvider>
-        </AuthProvider>
-      </SafeAreaProvider>
+      <AppBootstrap />
     </ErrorBoundary>
   );
 };

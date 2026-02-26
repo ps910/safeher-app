@@ -1,10 +1,23 @@
 /**
- * Emergency Context v4.0 - Global state for ALL safety features
+ * Emergency Context v5.0 - Global state for ALL safety features
  * Supports: SOS, Siren, Shake, Stealth, Recording, Tracking,
- *           Inactivity Timer, Journey Monitor, Scream Detection, Voice SOS
+ *           Inactivity Timer, Journey Monitor, Scream Detection, Voice SOS,
+ *           Live Location Tracking during SOS
  */
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
+import { Alert } from 'react-native';
+import {
+  startLiveLocationTracking,
+  stopLiveLocationTracking,
+  sendSOSToContacts,
+  sendLiveLocationUpdate,
+  requestLocationPermission,
+  makePhoneCall,
+} from '../utils/helpers';
+import OfflineLocationService from '../services/OfflineLocationService';
+import SafetyAIService from '../services/SafetyAIService';
 
 const EmergencyContext = createContext();
 
@@ -15,6 +28,8 @@ const STORAGE_KEYS = {
   STEALTH: '@girl_safety_stealth',
   SOS_HISTORY: '@girl_safety_sos_history',
   JOURNEY: '@girl_safety_journey',
+  JOURNEY_BREADCRUMBS: '@girl_safety_journey_breadcrumbs',
+  JOURNEY_HISTORY: '@girl_safety_journey_history',
 };
 
 const DEFAULT_SOS_MESSAGE =
@@ -59,25 +74,113 @@ export const EmergencyProvider = ({ children }) => {
   const [journeyOverdue, setJourneyOverdue] = useState(false);
   const [isScreamDetecting, setIsScreamDetecting] = useState(false);
 
+  // ── v5.0 Live Location during SOS ──
+  const [liveLocation, setLiveLocation] = useState(null);
+  const [isLiveTracking, setIsLiveTracking] = useState(false);
+
+  // ── v6.0 Journey Breadcrumb Tracking ──
+  const [journeyBreadcrumbs, setJourneyBreadcrumbs] = useState([]);
+  const [isDeviceMoving, setIsDeviceMoving] = useState(false);
+  const [journeyStats, setJourneyStats] = useState({ distance: 0, avgSpeed: 0, maxSpeed: 0 });
+  const [journeyHistory, setJourneyHistory] = useState([]);
+
+  // AI service status
+  const [aiServiceStatus, setAiServiceStatus] = useState({});
+
   const inactivityRef = useRef(null);
   const journeyRef = useRef(null);
+  const locationWatcherRef = useRef(null);
+  const locationUpdateTimerRef = useRef(null);
+  const lastLocationSentRef = useRef(null);
+  const journeyLocationRef = useRef(null);
+  const journeyBreadcrumbsRef = useRef([]);
+  const lastBreadcrumbRef = useRef(null);
+  const motionCheckRef = useRef(null);
 
   // ── Load saved data on mount ──
   useEffect(() => {
     loadSavedData();
+
+    // Listen to AI service events
+    const unsub = SafetyAIService.addListener((event) => {
+      setAiServiceStatus(SafetyAIService.getStatus());
+      if (event.type === 'scream_detected') {
+        // Prompt user before triggering SOS on scream
+        Alert.alert(
+          '🔊 Loud Sound Detected!',
+          'A scream or loud sound was detected. Do you need help?',
+          [
+            { text: 'I\'m OK', style: 'cancel' },
+            { text: '🆘 SEND SOS', style: 'destructive', onPress: () => triggerSOS() },
+          ],
+          { cancelable: true }
+        );
+      }
+    });
+
+    return () => {
+      unsub();
+      SafetyAIService.cleanup();
+    };
   }, []);
 
-  // ── Inactivity Monitor ──
+  // ── Start/stop AI services based on settings ──
+  useEffect(() => {
+    // Shake detection
+    if (settings.shakeToSOS && !isSOSActive) {
+      SafetyAIService.startShakeDetection(() => {
+        triggerSOS();
+      });
+    } else {
+      SafetyAIService.stopShakeDetection();
+    }
+
+    // Scream detection
+    if (settings.screamDetection && !isSOSActive) {
+      SafetyAIService.startScreamDetection(
+        (level) => { /* handled by listener above */ },
+        -20 + (settings.screamThreshold ? (settings.screamThreshold - 80) * 0.5 : 0)
+      );
+    } else {
+      SafetyAIService.stopScreamDetection();
+    }
+
+    setAiServiceStatus(SafetyAIService.getStatus());
+  }, [settings.shakeToSOS, settings.screamDetection, isSOSActive]);
+
+  // ── Inactivity Monitor (now actually triggers SOS after 2 consecutive overdue checks) ──
   useEffect(() => {
     if (inactivityRef.current) clearInterval(inactivityRef.current);
 
     if (settings.inactivitySOSEnabled && !isSOSActive) {
+      let warnedOnce = false;
       inactivityRef.current = setInterval(() => {
         const elapsed = (Date.now() - lastCheckIn.getTime()) / 1000 / 60;
         if (elapsed >= settings.inactivityTimeout) {
-          setCheckInOverdue(true);
+          if (!warnedOnce) {
+            // First overdue: warn the user
+            setCheckInOverdue(true);
+            warnedOnce = true;
+            Alert.alert(
+              '⏱️ Check-In Overdue!',
+              `You haven't checked in for ${settings.inactivityTimeout} minutes. Are you safe?`,
+              [
+                { text: 'I\'m Safe ✓', onPress: () => { checkIn(); warnedOnce = false; } },
+                { text: '🆘 Send SOS', style: 'destructive', onPress: () => triggerSOS() },
+              ],
+              { cancelable: false }
+            );
+          }
+          // If still overdue 5 min after warning, auto-trigger SOS
+          if (warnedOnce && elapsed >= settings.inactivityTimeout + 5) {
+            console.log('[Inactivity] Auto-triggering SOS after extended inactivity');
+            triggerSOS();
+            warnedOnce = false;
+          }
+        } else {
+          warnedOnce = false;
         }
-      }, 30000); // check every 30s
+      }, 30000);
     }
 
     return () => {
@@ -124,6 +227,18 @@ export const EmergencyProvider = ({ children }) => {
         const j = JSON.parse(journeyData);
         if (j && j.active) setActiveJourney(j);
       }
+
+      // Load journey breadcrumbs if active journey
+      const breadcrumbData = await AsyncStorage.getItem(STORAGE_KEYS.JOURNEY_BREADCRUMBS);
+      if (breadcrumbData) {
+        const crumbs = JSON.parse(breadcrumbData);
+        setJourneyBreadcrumbs(crumbs);
+        journeyBreadcrumbsRef.current = crumbs;
+      }
+
+      // Load journey history
+      const histData = await AsyncStorage.getItem(STORAGE_KEYS.JOURNEY_HISTORY);
+      if (histData) setJourneyHistory(JSON.parse(histData));
     } catch (error) {
       console.error('Error loading saved data:', error);
     }
@@ -197,8 +312,8 @@ export const EmergencyProvider = ({ children }) => {
     }
   };
 
-  // ── SOS Trigger ──
-  const triggerSOS = () => {
+  // ── SOS Trigger (v5.0 — with live location + auto message + nearby broadcast) ──
+  const triggerSOS = useCallback(async () => {
     setIsSOSActive(true);
     const entry = {
       id: Date.now().toString(),
@@ -209,12 +324,106 @@ export const EmergencyProvider = ({ children }) => {
     const updated = [entry, ...sosHistory].slice(0, 50);
     setSOSHistory(updated);
     AsyncStorage.setItem(STORAGE_KEYS.SOS_HISTORY, JSON.stringify(updated)).catch(() => {});
-  };
 
-  const cancelSOS = () => {
+    // Start live location tracking
+    try {
+      const subscription = await startLiveLocationTracking((newLocation) => {
+        setLiveLocation(newLocation);
+        setCurrentLocation(newLocation);
+        lastLocationSentRef.current = newLocation;
+      });
+      if (subscription) {
+        locationWatcherRef.current = subscription;
+        setIsLiveTracking(true);
+        console.log('[SOS] Live location tracking started');
+      }
+    } catch (e) {
+      console.error('[SOS] Failed to start live tracking:', e);
+    }
+
+    // Broadcast SOS to nearby users and start 5-second live location updates
+    try {
+      const sosResult = await OfflineLocationService.shareSOSLocation(
+        currentLocation, emergencyContacts, sosMessage
+      );
+      if (sosResult?.alertId) {
+        await OfflineLocationService.startLiveSOSBroadcast(sosResult.alertId);
+        console.log('[SOS] Nearby broadcast started, alertId:', sosResult.alertId);
+      }
+    } catch (e) {
+      console.error('[SOS] Failed to start nearby broadcast:', e);
+    }
+
+    // Activate AI SOS services (siren, recording, photo)
+    try {
+      const aiResult = await SafetyAIService.activateSOSServices(settings);
+      console.log('[SOS] AI services activated:', aiResult);
+      if (aiResult.siren) setSirenActive(true);
+      if (aiResult.recording) setIsRecording(true);
+    } catch (e) {
+      console.error('[SOS] AI services activation error:', e);
+    }
+
+    // Auto call police if enabled
+    if (settings.autoCallPolice) {
+      try {
+        setTimeout(() => makePhoneCall('112'), 3000); // 3s delay for message to send first
+      } catch (e) {
+        console.error('[SOS] Auto call police error:', e);
+      }
+    }
+
+    // Start periodic location update SMS (every 2 minutes)
+    locationUpdateTimerRef.current = setInterval(async () => {
+      if (lastLocationSentRef.current && emergencyContacts.length > 0) {
+        console.log('[SOS] Sending periodic live location update');
+        await sendLiveLocationUpdate(emergencyContacts, lastLocationSentRef.current);
+      }
+    }, 2 * 60 * 1000); // every 2 minutes
+  }, [currentLocation, sosHistory, emergencyContacts, sosMessage]);
+
+  const cancelSOS = useCallback(async () => {
     setIsSOSActive(false);
     setSirenActive(false);
-  };
+    setIsRecording(false);
+
+    // Deactivate AI SOS services (siren, recording, photos)
+    try {
+      const aiResult = await SafetyAIService.deactivateSOSServices();
+      console.log('[SOS] AI services deactivated:', aiResult);
+    } catch (e) {
+      console.error('[SOS] AI deactivation error:', e);
+    }
+
+    // Stop live location tracking
+    if (locationWatcherRef.current) {
+      stopLiveLocationTracking(locationWatcherRef.current);
+      locationWatcherRef.current = null;
+      setIsLiveTracking(false);
+      console.log('[SOS] Live location tracking stopped');
+    }
+
+    // Stop SOS broadcast to nearby users
+    OfflineLocationService.stopLiveSOSBroadcast();
+    console.log('[SOS] Nearby broadcast stopped');
+
+    // Clear periodic location update timer
+    if (locationUpdateTimerRef.current) {
+      clearInterval(locationUpdateTimerRef.current);
+      locationUpdateTimerRef.current = null;
+    }
+
+    lastLocationSentRef.current = null;
+    setLiveLocation(null);
+
+    // Re-start shake/scream detection if settings enabled
+    if (settings.shakeToSOS) {
+      SafetyAIService.startShakeDetection(() => triggerSOS());
+    }
+    if (settings.screamDetection) {
+      SafetyAIService.startScreamDetection(() => {}, -20);
+    }
+  }, [settings]);
 
   // ── Check-In (Inactivity Timer) ──
   const checkIn = () => {
@@ -222,7 +431,101 @@ export const EmergencyProvider = ({ children }) => {
     setCheckInOverdue(false);
   };
 
-  // ── Journey Tracking ──
+  // ── Haversine distance (meters) ──
+  const haversineDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  // ── Start journey breadcrumb location watcher (every 5s) ──
+  const startBreadcrumbTracking = async () => {
+    try {
+      const hasPerm = await requestLocationPermission();
+      if (!hasPerm) return;
+
+      // Location watcher — every 5 seconds
+      const sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 3 },
+        (loc) => {
+          const { latitude, longitude, speed, accuracy, altitude } = loc.coords;
+          const ts = new Date().toISOString();
+          const prev = lastBreadcrumbRef.current;
+
+          // Detect motion: moved > 3m from last point
+          let moved = false;
+          let dist = 0;
+          if (prev) {
+            dist = haversineDistance(prev.latitude, prev.longitude, latitude, longitude);
+            moved = dist > 3;
+          } else {
+            moved = true; // First point
+          }
+
+          setIsDeviceMoving(moved);
+
+          const crumb = {
+            latitude, longitude, speed: speed || 0, accuracy: accuracy || 0,
+            altitude: altitude || 0, timestamp: ts, moving: moved, distFromPrev: dist,
+          };
+
+          lastBreadcrumbRef.current = crumb;
+
+          // Always record point (even stationary — helps show stops)
+          journeyBreadcrumbsRef.current = [...journeyBreadcrumbsRef.current, crumb];
+          setJourneyBreadcrumbs([...journeyBreadcrumbsRef.current]);
+
+          // Update stats
+          const crumbs = journeyBreadcrumbsRef.current;
+          let totalDist = 0;
+          let maxSpd = 0;
+          let spdSum = 0;
+          let spdCount = 0;
+          for (let i = 1; i < crumbs.length; i++) {
+            totalDist += crumbs[i].distFromPrev || 0;
+            if (crumbs[i].speed > 0) {
+              spdSum += crumbs[i].speed;
+              spdCount++;
+              if (crumbs[i].speed > maxSpd) maxSpd = crumbs[i].speed;
+            }
+          }
+          setJourneyStats({
+            distance: totalDist,
+            avgSpeed: spdCount > 0 ? spdSum / spdCount : 0,
+            maxSpeed: maxSpd,
+          });
+
+          // Persist breadcrumbs every 10 points
+          if (crumbs.length % 10 === 0) {
+            AsyncStorage.setItem(STORAGE_KEYS.JOURNEY_BREADCRUMBS, JSON.stringify(crumbs)).catch(() => {});
+          }
+
+          // Also update global currentLocation
+          setCurrentLocation(loc);
+        }
+      );
+      journeyLocationRef.current = sub;
+      console.log('[Journey] Breadcrumb tracking started (5s interval)');
+    } catch (e) {
+      console.error('[Journey] Breadcrumb tracking failed:', e);
+    }
+  };
+
+  const stopBreadcrumbTracking = () => {
+    if (journeyLocationRef.current) {
+      journeyLocationRef.current.remove();
+      journeyLocationRef.current = null;
+      console.log('[Journey] Breadcrumb tracking stopped');
+    }
+    setIsDeviceMoving(false);
+    lastBreadcrumbRef.current = null;
+  };
+
+  // ── Journey Tracking (v6.0 — with breadcrumbs) ──
   const startJourney = async (destination, minutesToArrive) => {
     const journey = {
       active: true,
@@ -234,6 +537,16 @@ export const EmergencyProvider = ({ children }) => {
     };
     setActiveJourney(journey);
     setJourneyOverdue(false);
+
+    // Reset breadcrumbs
+    journeyBreadcrumbsRef.current = [];
+    setJourneyBreadcrumbs([]);
+    setJourneyStats({ distance: 0, avgSpeed: 0, maxSpeed: 0 });
+    await AsyncStorage.setItem(STORAGE_KEYS.JOURNEY_BREADCRUMBS, '[]').catch(() => {});
+
+    // Start breadcrumb tracking
+    await startBreadcrumbTracking();
+
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.JOURNEY, JSON.stringify(journey));
     } catch (e) {}
@@ -241,10 +554,34 @@ export const EmergencyProvider = ({ children }) => {
   };
 
   const completeJourney = async () => {
+    // Stop breadcrumb tracking
+    stopBreadcrumbTracking();
+
+    // Save to journey history
+    if (activeJourney) {
+      const completedJourney = {
+        ...activeJourney,
+        active: false,
+        completedAt: new Date().toISOString(),
+        endLocation: currentLocation,
+        breadcrumbs: journeyBreadcrumbsRef.current,
+        stats: journeyStats,
+        status: journeyOverdue ? 'overdue' : 'completed',
+      };
+      const updatedHistory = [completedJourney, ...journeyHistory].slice(0, 20);
+      setJourneyHistory(updatedHistory);
+      try {
+        await AsyncStorage.setItem(STORAGE_KEYS.JOURNEY_HISTORY, JSON.stringify(updatedHistory));
+      } catch (e) {}
+    }
+
     setActiveJourney(null);
     setJourneyOverdue(false);
+    journeyBreadcrumbsRef.current = [];
+    setJourneyBreadcrumbs([]);
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.JOURNEY);
+      await AsyncStorage.removeItem(STORAGE_KEYS.JOURNEY_BREADCRUMBS);
     } catch (e) {}
   };
 
@@ -264,6 +601,22 @@ export const EmergencyProvider = ({ children }) => {
     }
   };
 
+  // Build shareable journey data object
+  const getJourneyShareData = () => {
+    if (!activeJourney) return null;
+    return {
+      destination: activeJourney.destination,
+      startTime: activeJourney.startTime,
+      expectedArrival: activeJourney.expectedArrival,
+      startLocation: activeJourney.startLocation,
+      currentLocation,
+      breadcrumbs: journeyBreadcrumbsRef.current,
+      stats: journeyStats,
+      isOverdue: journeyOverdue,
+      totalPoints: journeyBreadcrumbsRef.current.length,
+    };
+  };
+
   const value = {
     emergencyContacts, settings, sosMessage,
     isSOSActive, currentLocation, stealthMode,
@@ -271,6 +624,12 @@ export const EmergencyProvider = ({ children }) => {
     // new v4.0
     lastCheckIn, checkInOverdue, activeJourney, journeyOverdue,
     isScreamDetecting,
+    // new v5.0
+    liveLocation, isLiveTracking,
+    // new v6.0 — journey breadcrumbs
+    journeyBreadcrumbs, isDeviceMoving, journeyStats, journeyHistory,
+    // new v7.0 — AI service status
+    aiServiceStatus,
     // setters
     setCurrentLocation, setIsTracking, setIsRecording,
     setSirenActive, setIsScreamDetecting,
@@ -279,6 +638,7 @@ export const EmergencyProvider = ({ children }) => {
     saveContacts, updateSettings, updateSOSMessage,
     toggleStealthMode, triggerSOS, cancelSOS,
     checkIn, startJourney, completeJourney, extendJourney,
+    getJourneyShareData,
   };
 
   return (

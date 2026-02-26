@@ -1,9 +1,21 @@
 /**
  * AuthContext - Authentication, PIN, Biometrics, Duress PIN, User Profile
  * Manages: login state, user profile (medical, addresses, vehicle), biometric auth
+ * Integrates with Database service for persistent user storage
  */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Lazy helper to safely get UserDB (avoid crash if Database module has issues)
+const getUserDB = async () => {
+  try {
+    const { UserDB } = await import('../services/Database');
+    return UserDB;
+  } catch (e) {
+    console.log('UserDB not available:', e);
+    return null;
+  }
+};
 
 const AuthContext = createContext();
 
@@ -15,6 +27,7 @@ const AUTH_KEYS = {
   BIOMETRIC_ENABLED: '@gs_biometric',
   AUTH_METHOD: '@gs_auth_method',
   SOCIAL_DATA: '@gs_social_data',
+  PROFILE_COMPLETE: '@gs_profile_complete',
 };
 
 const DEFAULT_PROFILE = {
@@ -44,6 +57,7 @@ export const AuthProvider = ({ children }) => {
   const [isDuressMode, setIsDuressMode] = useState(false);
   const [authMethod, setAuthMethod] = useState(null); // 'phone' | 'google' | 'facebook' | 'instagram' | 'pin'
   const [socialData, setSocialData] = useState(null);
+  const [isProfileComplete, setIsProfileComplete] = useState(false);
 
   useEffect(() => {
     loadAuthData();
@@ -68,6 +82,28 @@ export const AuthProvider = ({ children }) => {
       if (bioData) setBiometricEnabled(JSON.parse(bioData));
       if (authMethodData) setAuthMethod(authMethodData);
       if (socialDataStr) setSocialData(JSON.parse(socialDataStr));
+
+      // Load profile completion flag
+      const profileCompleteStr = await AsyncStorage.getItem(AUTH_KEYS.PROFILE_COMPLETE);
+      if (profileCompleteStr) setIsProfileComplete(JSON.parse(profileCompleteStr));
+
+      // Sync profile data to database (lazy)
+      try {
+        const UserDB = await getUserDB();
+        if (UserDB) {
+          const dbUser = await UserDB.get();
+          if (profileData && !dbUser?.fullName) {
+            const profile = JSON.parse(profileData);
+            await UserDB.save({
+              fullName: profile.fullName,
+              phone: profile.phone,
+              authMethod: authMethodData,
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.log('DB sync during auth load:', dbErr);
+      }
     } catch (e) {
       console.error('Auth load error:', e);
     }
@@ -119,9 +155,50 @@ export const AuthProvider = ({ children }) => {
     setUserProfile(updated);
     try {
       await AsyncStorage.setItem(AUTH_KEYS.PROFILE, JSON.stringify(updated));
+      // Sync to database (lazy)
+      try {
+        const UserDB = await getUserDB();
+        if (UserDB) {
+          await UserDB.save({
+            fullName: updated.fullName,
+            phone: updated.phone,
+            bloodGroup: updated.bloodGroup,
+          });
+        }
+      } catch (dbErr) {
+        console.log('Profile DB sync error:', dbErr);
+      }
     } catch (e) {
       console.error('Profile save error:', e);
     }
+  };
+
+  // Mark profile as complete (called after first-time setup)
+  const markProfileComplete = async () => {
+    setIsProfileComplete(true);
+    try {
+      await AsyncStorage.setItem(AUTH_KEYS.PROFILE_COMPLETE, JSON.stringify(true));
+    } catch (e) {
+      console.error('Profile complete flag save error:', e);
+    }
+  };
+
+  // Pre-fill profile from social/Gmail login data
+  const prefillFromSocial = () => {
+    const prefill = {};
+    if (socialData) {
+      if (socialData.name) prefill.fullName = socialData.name;
+      if (socialData.email) prefill.email = socialData.email;
+      if (socialData.phone) prefill.phone = socialData.phone;
+      if (socialData.avatar || socialData.picture) prefill.profilePicUri = socialData.avatar || socialData.picture;
+      if (socialData.given_name && socialData.family_name) {
+        prefill.fullName = `${socialData.given_name} ${socialData.family_name}`;
+      }
+    }
+    if (authMethod === 'phone' && userProfile.phone) {
+      prefill.phone = userProfile.phone;
+    }
+    return prefill;
   };
 
   // Authenticate
@@ -151,10 +228,11 @@ export const AuthProvider = ({ children }) => {
   const value = {
     isAuthenticated, isOnboarded, isLoading, userProfile,
     pin, duressPin, hasDuressPin, biometricEnabled, isDuressMode,
-    authMethod, socialData,
+    authMethod, socialData, isProfileComplete,
     setupPin, setupDuressPin, verifyPin, toggleBiometric,
     completeOnboarding, updateProfile, authenticate, lock,
     enterDuressMode, setIsDuressMode, socialLogin,
+    markProfileComplete, prefillFromSocial,
   };
 
   return (

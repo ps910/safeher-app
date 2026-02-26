@@ -2,7 +2,7 @@
   "expo": {
     "name": "SafeHer",
     "slug": "girl-safety-app",
-    "version": "4.0.0",
+    "version": "4.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -73,7 +73,19 @@
         }
       ],
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "newArchEnabled": true,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 24
+          }
+        }
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

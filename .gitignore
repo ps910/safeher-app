@@ -1,7 +1,21 @@
-node_modules
-android/
-ios/
 node_modules/
 .expo/
-build/
 dist/
+*.backup
+
+# Android build artifacts (keep source, ignore outputs)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+
+# iOS
+ios/Pods/
+ios/build/
+
+# Misc
+.idea/
+*.log
+*.hprof
