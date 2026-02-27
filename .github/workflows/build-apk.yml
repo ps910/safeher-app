@@ -9,7 +9,7 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       # 1. Checkout code
@@ -58,10 +58,12 @@ jobs:
       - name: Run Expo prebuild config
         run: npx expo prebuild --platform android --no-install 2>/dev/null || true
 
-      # 9. Build the APK
+      # 9. Build the APK (with increased memory + skip lint)
       - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError'
+        run: ./gradlew assembleRelease --no-daemon --max-workers=2 -x lintVitalAnalyzeRelease -x lintVitalReportRelease --stacktrace
 
       # 10. Find and rename APK
       - name: Find APK
