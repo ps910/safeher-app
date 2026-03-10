@@ -1,16 +1,16 @@
 /**
- * HomeScreen v5.1 — MODERN SAFETY DASHBOARD
- * Features: SOS, Shake-to-SOS, Siren, Audio Evidence, Scream Detection,
- *           Stealth Calculator, Auto Photo Capture, Check-In Timer,
- *           Journey Status, Quick Actions, Emergency Speed Dial
+ * HomeScreen v6.0 — MODERN SAFETY DASHBOARD
+ * Features: SOS, Shake-to-SOS, Volume-to-SOS, Siren, Audio Evidence,
+ *           Scream Detection, Stealth Calculator, Check-In Timer,
+ *           Journey Status, Quick Actions, Global Emergency Helplines
  *
- * Modernized UI: Gradient header, glass cards, glow SOS, refined grid
+ * v6.0: Global emergency numbers, volume SOS trigger, accessibility,
+ *       dark mode support, persistent SOS notification
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Vibration, Alert, Animated, Dimensions, StatusBar, Platform,
-  LinearGradient,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Accelerometer } from 'expo-sensors';
@@ -19,19 +19,24 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { useEmergency } from '../context/EmergencyContext';
-import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, SIZES, SHADOWS, useTheme } from '../constants/theme';
 import {
   makePhoneCall, sendSMS, sendSOSToContacts,
-  getCurrentPosition, EMERGENCY_NUMBERS, vibrateEmergency,
+  getCurrentPosition, vibrateEmergency,
   checkNetworkStatus, sendOfflineSMS,
+  getLocalEmergencyNumbers, getLocalDisplayHelplines,
+  handleVolumePress,
 } from '../utils/helpers';
+import NotificationService from '../services/NotificationService';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const SOS_COUNTDOWN_DEFAULT = 5;
-const BUILD_VERSION = 'v5.1.0 • Build 2026-02-26';
+const BUILD_VERSION = 'v6.0.0 • Build 2026-03-10';
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const { colors, isDark } = useTheme();
+  const EMERGENCY_NUMBERS = getLocalEmergencyNumbers();
   const {
     emergencyContacts, settings, sosMessage,
     isSOSActive, triggerSOS, cancelSOS,
@@ -293,8 +298,22 @@ export default function HomeScreen() {
     if (settings.sirenEnabled) startSiren();
     if (settings.autoRecordAudio) startEvidenceRecording();
 
+    // Send push notification for SOS
+    NotificationService.sendSOSActiveNotification(loc);
+
     if (emergencyContacts.length > 0) {
       const isOnline = await checkNetworkStatus();
+
+      // Try FCM push notifications first (most reliable)
+      if (isOnline) {
+        try {
+          await NotificationService.sendSOSPushToContacts(emergencyContacts, sosMessage, loc);
+        } catch (e) {
+          console.log('[SOS] Push notification failed, falling back to SMS:', e);
+        }
+      }
+
+      // Also send SMS (dual delivery for reliability)
       if (!isOnline && settings.offlineSOS) {
         await sendOfflineSMS(emergencyContacts, sosMessage, loc);
       } else {
@@ -583,17 +602,19 @@ export default function HomeScreen() {
 
         {/* ── SOS BUTTON ─────────────────────────────── */}
         {countdown !== null ? (
-          <View style={styles.countdownContainer}>
+          <View style={styles.countdownContainer} accessibilityLabel={`SOS activating in ${countdown} seconds`}>
             <Text style={styles.countdownLabel}>SOS ACTIVATING IN</Text>
             <View style={styles.countdownCircle}>
               <Text style={styles.countdownNumber}>{countdown}</Text>
             </View>
-            <TouchableOpacity style={styles.cancelBtn} onPress={cancelCountdown} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={cancelCountdown} activeOpacity={0.8}
+              accessibilityLabel="Cancel SOS countdown" accessibilityRole="button">
               <Text style={styles.cancelBtnText}>CANCEL</Text>
             </TouchableOpacity>
           </View>
         ) : isSOSActive ? (
-          <TouchableOpacity style={styles.stopSOSBtn} onPress={stopSOS} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.stopSOSBtn} onPress={stopSOS} activeOpacity={0.8}
+            accessibilityLabel="Stop SOS emergency. Tap to cancel" accessibilityRole="button">
             <Ionicons name="stop-circle" size={44} color="#FFF" />
             <Text style={styles.stopSOSText}>STOP SOS</Text>
             <Text style={styles.stopSOSSub}>Tap to cancel emergency</Text>
@@ -608,6 +629,9 @@ export default function HomeScreen() {
                 onPress={startSOSCountdown}
                 onLongPress={executeFullSOS}
                 activeOpacity={0.7}
+                accessibilityLabel="SOS Emergency Button. Tap to start countdown, long press for immediate SOS"
+                accessibilityRole="button"
+                accessibilityHint="Activates emergency alert and notifies your contacts"
               >
                 <Ionicons name="alert-circle" size={44} color="#FFF" />
                 <Text style={styles.sosText}>SOS</Text>
@@ -661,7 +685,8 @@ export default function HomeScreen() {
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickGrid}>
           {quickActions.map((action, idx) => (
-            <TouchableOpacity key={idx} style={styles.quickCard} onPress={action.onPress} activeOpacity={0.8}>
+            <TouchableOpacity key={idx} style={styles.quickCard} onPress={action.onPress} activeOpacity={0.8}
+              accessibilityLabel={action.label.replace('\n', ' ')} accessibilityRole="button">
               <View style={[styles.quickIcon, { backgroundColor: action.color + '12' }]}>
                 <Ionicons name={action.icon} size={24} color={action.color} />
               </View>
@@ -670,22 +695,17 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* ── Emergency Helplines ─────────────────────── */}
+        {/* ── Emergency Helplines (country-aware) ────── */}
         <Text style={styles.sectionTitle}>Emergency Helplines</Text>
         <View style={styles.helplineCard}>
-          {[
-            { label: 'National Emergency', number: '112', icon: 'call', color: '#FF1744' },
-            { label: 'Police', number: '100', icon: 'shield', color: '#1565C0' },
-            { label: 'Women Helpline', number: '1091', icon: 'woman', color: '#AA00FF' },
-            { label: 'Ambulance', number: '108', icon: 'medical', color: '#FF6D00' },
-            { label: 'Child Helpline', number: '1098', icon: 'heart', color: '#E91E63' },
-            { label: 'Cyber Crime', number: '1930', icon: 'globe', color: '#00838F' },
-          ].map((line, i) => (
+          {getLocalDisplayHelplines().map((line, i) => (
             <TouchableOpacity
               key={i}
               style={styles.helplineRow}
               onPress={() => makePhoneCall(line.number)}
               activeOpacity={0.7}
+              accessibilityLabel={`Call ${line.label} at ${line.number}`}
+              accessibilityRole="button"
             >
               <View style={[styles.helplineIconWrap, { backgroundColor: line.color + '12' }]}>
                 <Ionicons name={line.icon} size={17} color={line.color} />

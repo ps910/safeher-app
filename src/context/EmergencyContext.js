@@ -1,8 +1,9 @@
 /**
- * Emergency Context v5.0 - Global state for ALL safety features
+ * Emergency Context v6.0 - Global state for ALL safety features
  * Supports: SOS, Siren, Shake, Stealth, Recording, Tracking,
  *           Inactivity Timer, Journey Monitor, Scream Detection, Voice SOS,
- *           Live Location Tracking during SOS
+ *           Live Location Tracking, Background Location, Push Notifications,
+ *           Live Sharing Sessions, Encrypted Storage
  */
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,6 +19,10 @@ import {
 } from '../utils/helpers';
 import OfflineLocationService from '../services/OfflineLocationService';
 import SafetyAIService from '../services/SafetyAIService';
+import BackgroundLocationService from '../services/BackgroundLocationService';
+import NotificationService from '../services/NotificationService';
+import LiveLocationSharingService from '../services/LiveLocationSharingService';
+import EncryptedStorageService from '../services/EncryptedStorageService';
 
 const EmergencyContext = createContext();
 
@@ -53,6 +58,13 @@ const DEFAULT_SETTINGS = {
   autoPhotoCapture: true,
   journeyAlerts: true,
   panicWipeEnabled: false,
+  // v6.0 settings
+  backgroundLocationEnabled: true,
+  persistentSOSNotification: true,
+  volumeButtonSOS: true,
+  liveLocationSharing: true,
+  pushNotifications: true,
+  countryOverride: null,    // null = auto-detect
 };
 
 export const EmergencyProvider = ({ children }) => {
@@ -77,6 +89,12 @@ export const EmergencyProvider = ({ children }) => {
   // ── v5.0 Live Location during SOS ──
   const [liveLocation, setLiveLocation] = useState(null);
   const [isLiveTracking, setIsLiveTracking] = useState(false);
+
+  // ── v6.0 Background Location + Live Sharing + Push ──
+  const [isBackgroundTracking, setIsBackgroundTracking] = useState(false);
+  const [liveShareSession, setLiveShareSession] = useState(null);
+  const [isLiveSharing, setIsLiveSharing] = useState(false);
+  const [pushToken, setPushToken] = useState(null);
 
   // ── v6.0 Journey Breadcrumb Tracking ──
   const [journeyBreadcrumbs, setJourneyBreadcrumbs] = useState([]);
@@ -208,11 +226,14 @@ export const EmergencyProvider = ({ children }) => {
 
   const loadSavedData = async () => {
     try {
+      // Run encrypted storage migration (one-time, transparent)
+      await EncryptedStorageService.migrateToEncrypted();
+
       const [contactsData, settingsData, messageData, stealthData, historyData, journeyData] =
         await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.CONTACTS),
-          AsyncStorage.getItem(STORAGE_KEYS.SETTINGS),
-          AsyncStorage.getItem(STORAGE_KEYS.SOS_MESSAGE),
+          EncryptedStorageService.getItem(STORAGE_KEYS.CONTACTS),
+          EncryptedStorageService.getItem(STORAGE_KEYS.SETTINGS),
+          EncryptedStorageService.getItem(STORAGE_KEYS.SOS_MESSAGE),
           AsyncStorage.getItem(STORAGE_KEYS.STEALTH),
           AsyncStorage.getItem(STORAGE_KEYS.SOS_HISTORY),
           AsyncStorage.getItem(STORAGE_KEYS.JOURNEY),
@@ -239,15 +260,46 @@ export const EmergencyProvider = ({ children }) => {
       // Load journey history
       const histData = await AsyncStorage.getItem(STORAGE_KEYS.JOURNEY_HISTORY);
       if (histData) setJourneyHistory(JSON.parse(histData));
+
+      // ── Initialize v6.0 services ──
+      // 1. Push Notifications
+      const notifResult = await NotificationService.initialize({
+        onSOSTrigger: () => triggerSOS(),
+      });
+      if (notifResult.pushToken) setPushToken(notifResult.pushToken);
+
+      // 2. Persistent SOS notification (quick-tap in tray)
+      const loadedSettings = settingsData ? { ...DEFAULT_SETTINGS, ...JSON.parse(settingsData) } : DEFAULT_SETTINGS;
+      if (loadedSettings.persistentSOSNotification) {
+        await NotificationService.showPersistentSOSNotification();
+      }
+
+      // 3. Background location tracking
+      if (loadedSettings.backgroundLocationEnabled) {
+        await BackgroundLocationService.startTracking({
+          sosMode: false,
+          onLocation: (locations) => {
+            if (locations?.length > 0) {
+              const latest = locations[locations.length - 1];
+              setCurrentLocation(latest);
+              // If live sharing is active, push updates
+              if (LiveLocationSharingService.isSharing()) {
+                LiveLocationSharingService.updateLocation(latest);
+              }
+            }
+          },
+        });
+        setIsBackgroundTracking(true);
+      }
     } catch (error) {
       console.error('Error loading saved data:', error);
     }
   };
 
-  // ── Contacts CRUD ──
+  // ── Contacts CRUD (encrypted storage) ──
   const saveContacts = async (contacts) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+      await EncryptedStorageService.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
       setEmergencyContacts(contacts);
     } catch (error) {
       console.error('Error saving contacts:', error);
@@ -282,12 +334,28 @@ export const EmergencyProvider = ({ children }) => {
     await saveContacts(updated);
   };
 
-  // ── Settings ──
+  // ── Settings (encrypted storage) ──
   const updateSettings = async (newSettings) => {
     const updated = { ...settings, ...newSettings };
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+      await EncryptedStorageService.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
       setSettings(updated);
+
+      // React to setting changes for v6.0 services
+      if ('backgroundLocationEnabled' in newSettings) {
+        if (newSettings.backgroundLocationEnabled) {
+          await BackgroundLocationService.startTracking({ sosMode: false });
+          setIsBackgroundTracking(true);
+        } else {
+          await BackgroundLocationService.stopTracking();
+          setIsBackgroundTracking(false);
+        }
+      }
+      if ('persistentSOSNotification' in newSettings) {
+        if (newSettings.persistentSOSNotification) {
+          await NotificationService.showPersistentSOSNotification();
+        }
+      }
     } catch (error) {
       console.error('Error saving settings:', error);
     }
@@ -295,7 +363,7 @@ export const EmergencyProvider = ({ children }) => {
 
   const updateSOSMessage = async (message) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.SOS_MESSAGE, message);
+      await EncryptedStorageService.setItem(STORAGE_KEYS.SOS_MESSAGE, message);
       setSosMessage(message);
     } catch (error) {
       console.error('Error saving SOS message:', error);
@@ -312,7 +380,7 @@ export const EmergencyProvider = ({ children }) => {
     }
   };
 
-  // ── SOS Trigger (v5.0 — with live location + auto message + nearby broadcast) ──
+  // ── SOS Trigger (v6.0 — background location SOS + live sharing + push + nearby) ──
   const triggerSOS = useCallback(async () => {
     setIsSOSActive(true);
     const entry = {
@@ -325,12 +393,50 @@ export const EmergencyProvider = ({ children }) => {
     setSOSHistory(updated);
     AsyncStorage.setItem(STORAGE_KEYS.SOS_HISTORY, JSON.stringify(updated)).catch(() => {});
 
+    // v6.0: Activate background location SOS mode (high-frequency GPS)
+    try {
+      await BackgroundLocationService.activateSOSMode();
+      setIsBackgroundTracking(true);
+      console.log('[SOS] Background location SOS mode activated');
+    } catch (e) {
+      console.error('[SOS] Background location SOS mode error:', e);
+    }
+
+    // v6.0: Start live location sharing session (shareable URL for contacts)
+    try {
+      if (settings.liveLocationSharing) {
+        const session = await LiveLocationSharingService.startSession({
+          userName: 'SafeHer User',
+          ttlMinutes: 60,
+          purpose: 'SOS Emergency',
+        });
+        if (session) {
+          setLiveShareSession(session);
+          setIsLiveSharing(true);
+          console.log('[SOS] Live sharing started:', session.shareUrl);
+        }
+      }
+    } catch (e) {
+      console.error('[SOS] Live sharing error:', e);
+    }
+
+    // v6.0: Send SOS active push notification
+    try {
+      await NotificationService.sendSOSActiveNotification();
+    } catch (e) {
+      console.error('[SOS] Push notification error:', e);
+    }
+
     // Start live location tracking
     try {
       const subscription = await startLiveLocationTracking((newLocation) => {
         setLiveLocation(newLocation);
         setCurrentLocation(newLocation);
         lastLocationSentRef.current = newLocation;
+        // Push to live sharing session
+        if (LiveLocationSharingService.isSharing()) {
+          LiveLocationSharingService.updateLocation(newLocation).catch(() => {});
+        }
       });
       if (subscription) {
         locationWatcherRef.current = subscription;
@@ -367,7 +473,7 @@ export const EmergencyProvider = ({ children }) => {
     // Auto call police if enabled
     if (settings.autoCallPolice) {
       try {
-        setTimeout(() => makePhoneCall('112'), 3000); // 3s delay for message to send first
+        setTimeout(() => makePhoneCall('112'), 3000);
       } catch (e) {
         console.error('[SOS] Auto call police error:', e);
       }
@@ -379,8 +485,8 @@ export const EmergencyProvider = ({ children }) => {
         console.log('[SOS] Sending periodic live location update');
         await sendLiveLocationUpdate(emergencyContacts, lastLocationSentRef.current);
       }
-    }, 2 * 60 * 1000); // every 2 minutes
-  }, [currentLocation, sosHistory, emergencyContacts, sosMessage]);
+    }, 2 * 60 * 1000);
+  }, [currentLocation, sosHistory, emergencyContacts, sosMessage, settings]);
 
   const cancelSOS = useCallback(async () => {
     setIsSOSActive(false);
@@ -393,6 +499,26 @@ export const EmergencyProvider = ({ children }) => {
       console.log('[SOS] AI services deactivated:', aiResult);
     } catch (e) {
       console.error('[SOS] AI deactivation error:', e);
+    }
+
+    // v6.0: Deactivate background location SOS mode (revert to normal tracking)
+    try {
+      await BackgroundLocationService.deactivateSOSMode();
+      console.log('[SOS] Background location reverted to normal mode');
+    } catch (e) {
+      console.error('[SOS] Background location deactivation error:', e);
+    }
+
+    // v6.0: Stop live location sharing session
+    try {
+      if (isLiveSharing) {
+        await LiveLocationSharingService.endSession();
+        setLiveShareSession(null);
+        setIsLiveSharing(false);
+        console.log('[SOS] Live sharing session ended');
+      }
+    } catch (e) {
+      console.error('[SOS] Live sharing stop error:', e);
     }
 
     // Stop live location tracking
@@ -423,7 +549,7 @@ export const EmergencyProvider = ({ children }) => {
     if (settings.screamDetection) {
       SafetyAIService.startScreamDetection(() => {}, -20);
     }
-  }, [settings]);
+  }, [settings, isLiveSharing]);
 
   // ── Check-In (Inactivity Timer) ──
   const checkIn = () => {
@@ -617,18 +743,49 @@ export const EmergencyProvider = ({ children }) => {
     };
   };
 
+  // ── Live Location Sharing (manual start/stop outside SOS) ──
+  const startLiveLocationSharing = async (options = {}) => {
+    try {
+      const session = await LiveLocationSharingService.startSession({
+        userName: options.userName || 'SafeHer User',
+        ttlMinutes: options.ttlMinutes || 30,
+        purpose: options.purpose || 'Location Sharing',
+      });
+      if (session) {
+        setLiveShareSession(session);
+        setIsLiveSharing(true);
+        return session;
+      }
+    } catch (e) {
+      console.error('[LiveShare] Start error:', e);
+    }
+    return null;
+  };
+
+  const stopLiveLocationSharing = async () => {
+    try {
+      await LiveLocationSharingService.endSession();
+      setLiveShareSession(null);
+      setIsLiveSharing(false);
+    } catch (e) {
+      console.error('[LiveShare] Stop error:', e);
+    }
+  };
+
   const value = {
     emergencyContacts, settings, sosMessage,
     isSOSActive, currentLocation, stealthMode,
     isTracking, isRecording, sirenActive, sosHistory,
-    // new v4.0
+    // v4.0
     lastCheckIn, checkInOverdue, activeJourney, journeyOverdue,
     isScreamDetecting,
-    // new v5.0
+    // v5.0
     liveLocation, isLiveTracking,
-    // new v6.0 — journey breadcrumbs
+    // v6.0 — journey breadcrumbs
     journeyBreadcrumbs, isDeviceMoving, journeyStats, journeyHistory,
-    // new v7.0 — AI service status
+    // v6.0 — background location + live sharing + push
+    isBackgroundTracking, liveShareSession, isLiveSharing, pushToken,
+    // AI service status
     aiServiceStatus,
     // setters
     setCurrentLocation, setIsTracking, setIsRecording,
@@ -639,6 +796,8 @@ export const EmergencyProvider = ({ children }) => {
     toggleStealthMode, triggerSOS, cancelSOS,
     checkIn, startJourney, completeJourney, extendJourney,
     getJourneyShareData,
+    // v6.0 live sharing
+    startLiveLocationSharing, stopLiveLocationSharing,
   };
 
   return (

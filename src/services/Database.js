@@ -373,6 +373,26 @@ export const EvidenceDB = {
     return logs.filter(l => !l.synced).length;
   },
 
+  async remove(id) {
+    const logs = await this.getAll();
+    const updated = logs.filter(l => l.id !== id);
+    cacheSet(TABLES.EVIDENCE, updated);
+    buildIndex(TABLES.EVIDENCE, updated, ['id']);
+    await forceFlush(TABLES.EVIDENCE);
+    // Also remove associated file entry
+    const files = await this.getFiles();
+    const updatedFiles = files.filter(f => f.id !== id && f.evidenceId !== id);
+    cacheSet(TABLES.EVIDENCE_FILES, updatedFiles);
+    await forceFlush(TABLES.EVIDENCE_FILES);
+  },
+
+  async removeFile(id) {
+    const files = await this.getFiles();
+    const updated = files.filter(f => f.id !== id);
+    cacheSet(TABLES.EVIDENCE_FILES, updated);
+    await forceFlush(TABLES.EVIDENCE_FILES);
+  },
+
   async clear() {
     cacheSet(TABLES.EVIDENCE, []);
     cacheSet(TABLES.EVIDENCE_FILES, []);

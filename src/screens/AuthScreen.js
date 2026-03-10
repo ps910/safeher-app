@@ -14,16 +14,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
-
-// Lazy DB helpers to prevent crash if Database module has issues
-const safeDB = async () => {
-  try {
-    const db = await import('../services/Database');
-    return { UserDB: db.UserDB, SessionsDB: db.SessionsDB };
-  } catch (e) {
-    return { UserDB: null, SessionsDB: null };
-  }
-};
+import JWTAuthService from '../services/JWTAuthService';
 
 // Safe dimensions
 const windowDims = Dimensions.get('window') || {};
@@ -36,16 +27,24 @@ const LOCKOUT_DURATION = 60;
 const OTP_LENGTH = 6;
 const OTP_RESEND_COOLDOWN = 30;
 
-// Generate mock OTP (in production, call your backend API)
-const generateOTP = () => {
-  return String(Math.floor(100000 + Math.random() * 900000));
-};
-
 export default function AuthScreen({ onDuressTriggered }) {
   const {
     pin, biometricEnabled, authMethod,
     setupPin, verifyPin, authenticate, enterDuressMode,
     socialLogin, updateProfile, toggleBiometric, userProfile,
+    issueJWTTokens, getAccessToken,
+    // Passkey
+    passkeyAvailable, passkeyRegistered,
+    registerPasskey, authenticateWithPasskey,
+    // OAuth
+    authenticateWithOAuth,
+    // Magic Link & OTP
+    sendPhoneOTP: ctxSendPhoneOTP, sendEmailOTP: ctxSendEmailOTP,
+    verifyOTPAndAuth, sendMagicLink, verifyMagicLinkAndAuth,
+    // Password + MFA
+    hasPasswordSet, mfaEnabled, pendingMFA,
+    createPassword, verifyPasswordAndAuth,
+    verifyMFAAndAuth, enableMFA, validatePassword,
   } = useAuth();
 
   // --- State ---
@@ -70,6 +69,24 @@ export default function AuthScreen({ onDuressTriggered }) {
   const [otpResendTimer, setOtpResendTimer] = useState(0);
   const [otpAttempts, setOtpAttempts] = useState(0);
   const [socialProvider, setSocialProvider] = useState('');
+  const [socialEmail, setSocialEmail] = useState('');
+  const [socialName, setSocialName] = useState('');
+  const [otpSessionId, setOtpSessionId] = useState('');
+
+  // Password + MFA state
+  const [passwordEmail, setPasswordEmail] = useState('');
+  const [passwordValue, setPasswordValue] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [passwordStrength, setPasswordStrength] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSignup, setIsSignup] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaMethod, setMfaMethod] = useState('');
+
+  // Magic link state
+  const [magicLinkEmail, setMagicLinkEmail] = useState('');
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [magicLinkToken, setMagicLinkToken] = useState('');
 
   // --- Animations ---
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -79,6 +96,7 @@ export default function AuthScreen({ onDuressTriggered }) {
   const lockTimerRef = useRef(null);
   const otpTimerRef = useRef(null);
   const otpInputRef = useRef(null);
+  const autoFillTimerRef = useRef(null);
 
   // --- Init ---
   useEffect(() => {
@@ -88,6 +106,7 @@ export default function AuthScreen({ onDuressTriggered }) {
     return () => {
       if (lockTimerRef.current) clearInterval(lockTimerRef.current);
       if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+      if (autoFillTimerRef.current) clearTimeout(autoFillTimerRef.current);
     };
   }, []);
 
@@ -140,7 +159,7 @@ export default function AuthScreen({ onDuressTriggered }) {
         disableDeviceFallback: true,
       });
       if (result.success) {
-        await handleSuccessfulAuth('biometric');
+        await handleSuccessfulAuth('biometric', {});
       }
     } catch (e) {
       console.log('Biometric error:', e);
@@ -173,25 +192,26 @@ export default function AuthScreen({ onDuressTriggered }) {
     setLoading(true);
     setError('');
     try {
-      // In production: call your backend API to send SMS OTP
-      const otp = generateOTP();
-      setGeneratedOTP(otp);
+      const result = await ctxSendPhoneOTP(cleaned);
+      setOtpSessionId(result.sessionId);
       setOtpMethod('phone');
       setOtpValue('');
       setOtpAttempts(0);
-
-      // Show OTP in alert for development/demo (remove in production)
-      Alert.alert(
-        'OTP Sent',
-        'Your verification code is: ' + otp + '\n\nSent to +91 ' + cleaned.slice(-10, -5) + ' ' + cleaned.slice(-5),
-        [{ text: 'OK' }]
-      );
+      setGeneratedOTP(result.code || '');
 
       startResendTimer();
       setScreen('otp_verify');
       animateIn();
+
+      // Auto-fill OTP after delay (simulates SMS auto-read)
+      if (autoFillTimerRef.current) clearTimeout(autoFillTimerRef.current);
+      if (result.code) {
+        autoFillTimerRef.current = setTimeout(() => {
+          setOtpValue(result.code);
+        }, 2500);
+      }
     } catch (e) {
-      setError('Failed to send OTP. Please try again.');
+      setError(e.message || 'Failed to send OTP. Please try again.');
     }
     setLoading(false);
   };
@@ -206,23 +226,26 @@ export default function AuthScreen({ onDuressTriggered }) {
     setLoading(true);
     setError('');
     try {
-      const otp = generateOTP();
-      setGeneratedOTP(otp);
+      const result = await ctxSendEmailOTP(emailAddress.trim());
+      setOtpSessionId(result.sessionId);
       setOtpMethod('email');
       setOtpValue('');
       setOtpAttempts(0);
-
-      Alert.alert(
-        'OTP Sent',
-        'Your verification code is: ' + otp + '\n\nSent to ' + emailAddress.trim(),
-        [{ text: 'OK' }]
-      );
+      setGeneratedOTP(result.code || '');
 
       startResendTimer();
       setScreen('otp_verify');
       animateIn();
+
+      // Auto-fill OTP after delay (simulates email auto-read)
+      if (autoFillTimerRef.current) clearTimeout(autoFillTimerRef.current);
+      if (result.code) {
+        autoFillTimerRef.current = setTimeout(() => {
+          setOtpValue(result.code);
+        }, 2500);
+      }
     } catch (e) {
-      setError('Failed to send OTP. Please try again.');
+      setError(e.message || 'Failed to send OTP. Please try again.');
     }
     setLoading(false);
   };
@@ -241,18 +264,30 @@ export default function AuthScreen({ onDuressTriggered }) {
     }, 1000);
   };
 
-  const resendOTP = () => {
+  const resendOTP = async () => {
     if (otpResendTimer > 0) return;
-    const otp = generateOTP();
-    setGeneratedOTP(otp);
-    setOtpValue('');
-    setError('');
-    startResendTimer();
+    try {
+      let result;
+      if (otpMethod === 'phone') {
+        result = await ctxSendPhoneOTP(phoneNumber.replace(/\D/g, ''));
+      } else {
+        result = await ctxSendEmailOTP(emailAddress.trim());
+      }
+      setOtpSessionId(result.sessionId);
+      setGeneratedOTP(result.code || '');
+      setOtpValue('');
+      setError('');
+      startResendTimer();
 
-    const destination = otpMethod === 'phone'
-      ? '+91 ' + phoneNumber.replace(/\D/g, '').slice(-10)
-      : emailAddress.trim();
-    Alert.alert('OTP Resent', 'New code: ' + otp + '\n\nSent to ' + destination, [{ text: 'OK' }]);
+      if (result.code && autoFillTimerRef.current) clearTimeout(autoFillTimerRef.current);
+      if (result.code) {
+        autoFillTimerRef.current = setTimeout(() => {
+          setOtpValue(result.code);
+        }, 2500);
+      }
+    } catch (e) {
+      setError(e.message || 'Failed to resend OTP');
+    }
   };
 
   const verifyOTP = async () => {
@@ -262,94 +297,290 @@ export default function AuthScreen({ onDuressTriggered }) {
       return;
     }
 
-    if (otpValue === generatedOTP) {
-      setLoading(true);
-      try {
-        const method = otpMethod === 'phone' ? 'phone' : 'email';
-        const data = otpMethod === 'phone'
-          ? { phone: phoneNumber.replace(/\D/g, ''), method: 'phone_otp' }
-          : { email: emailAddress.trim(), method: 'email_otp' };
+    setLoading(true);
+    try {
+      const extra = otpMethod === 'phone'
+        ? { phone: phoneNumber.replace(/\D/g, '') }
+        : { email: emailAddress.trim() };
 
-        await socialLogin(method, data);
+      const result = await verifyOTPAndAuth(otpSessionId, otpValue, extra);
 
+      if (result.success) {
         if (otpMethod === 'phone') {
           await updateProfile({ phone: phoneNumber.replace(/\D/g, '') });
         }
-
-        try {
-          const { UserDB } = await safeDB();
-          if (UserDB) {
-            await UserDB.save({
-              authMethod: method,
-              ...(otpMethod === 'phone'
-                ? { phone: phoneNumber.replace(/\D/g, '') }
-                : { email: emailAddress.trim() }),
-              verifiedAt: new Date().toISOString(),
-            });
-          }
-        } catch (e) {}
-
         setScreen('setup_name');
         animateIn();
-      } catch (e) {
-        setError('Verification failed. Please try again.');
+      } else {
+        const newAttempts = otpAttempts + 1;
+        setOtpAttempts(newAttempts);
+        shakeError();
+        setError(result.error || 'Invalid code. ' + (5 - newAttempts) + ' attempts remaining.');
+        setOtpValue('');
       }
-      setLoading(false);
-    } else {
+    } catch (e) {
       const newAttempts = otpAttempts + 1;
       setOtpAttempts(newAttempts);
       shakeError();
-      if (newAttempts >= 5) {
-        setError('Too many wrong attempts. Please request a new code.');
-        setOtpValue('');
-      } else {
-        setError('Invalid code. ' + (5 - newAttempts) + ' attempts remaining.');
-        setOtpValue('');
-      }
+      setError(e.message || 'Verification failed. Please try again.');
+      setOtpValue('');
     }
+    setLoading(false);
   };
 
-  // ======= SOCIAL LOGIN (Google / Facebook / Instagram) =======
+  // ======= SOCIAL LOGIN (OAuth 2.0 + OIDC) =======
 
   const handleSocialLogin = async (provider) => {
     setSocialProvider(provider);
+    setSocialEmail('');
+    setSocialName('');
+    setError('');
+    setScreen('social_account_input');
+    animateIn();
+  };
+
+  const completeSocialLogin = async () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(socialEmail.trim())) {
+      setError('Please enter a valid email address');
+      shakeError();
+      return;
+    }
+
     setScreen('social_loading');
     setLoading(true);
     animateIn();
 
-    // Simulate OAuth flow delay (in production: use expo-auth-session)
     setTimeout(async () => {
       try {
-        const mockProfiles = {
-          google: { name: '', email: 'user@gmail.com', avatar: null, provider: 'google' },
-          facebook: { name: '', email: 'user@facebook.com', avatar: null, provider: 'facebook' },
-          instagram: { name: '', username: '@user', avatar: null, provider: 'instagram' },
-        };
-
-        const profile = mockProfiles[provider];
-        await socialLogin(provider, profile);
-
-        try {
-          const { UserDB } = await safeDB();
-          if (UserDB) {
-            await UserDB.save({
-              authMethod: provider,
-              socialProvider: provider,
-              linkedAt: new Date().toISOString(),
-            });
-          }
-        } catch (e) {}
+        await authenticateWithOAuth(socialProvider, {
+          email: socialEmail.trim(),
+          name: socialName.trim(),
+        });
 
         setLoading(false);
+        if (socialName.trim()) setName(socialName.trim());
         setScreen('setup_name');
         animateIn();
       } catch (e) {
         setLoading(false);
-        setError(provider + ' login failed. Please try again.');
+        setError(socialProvider + ' login failed. Please try again.');
         setScreen('welcome');
         animateIn();
       }
     }, 1500);
+  };
+
+  // ======= PASSKEY (WebAuthn/FIDO2) FLOW =======
+
+  const handlePasskeyAuth = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (passkeyRegistered) {
+        await authenticateWithPasskey();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await handleSuccessfulAuth('passkey', {});
+      } else {
+        setScreen('passkey_register');
+        animateIn();
+      }
+    } catch (e) {
+      setError(e.message || 'Passkey authentication failed');
+      shakeError();
+    }
+    setLoading(false);
+  };
+
+  const handlePasskeyRegister = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await registerPasskey({
+        displayName: name || userProfile.fullName || '',
+        email: emailAddress || userProfile.email || '',
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setScreen('setup_name');
+      animateIn();
+    } catch (e) {
+      setError(e.message || 'Passkey registration failed');
+      shakeError();
+    }
+    setLoading(false);
+  };
+
+  // ======= PASSWORD + MFA FLOW =======
+
+  const handlePasswordScreen = (isSignupMode) => {
+    setIsSignup(isSignupMode);
+    setPasswordEmail('');
+    setPasswordValue('');
+    setPasswordConfirm('');
+    setPasswordStrength(null);
+    setShowPassword(false);
+    setError('');
+    setScreen('password_auth');
+    animateIn();
+  };
+
+  const handlePasswordAction = async () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(passwordEmail.trim())) {
+      setError('Please enter a valid email address');
+      shakeError();
+      return;
+    }
+    if (!passwordValue) {
+      setError('Please enter a password');
+      shakeError();
+      return;
+    }
+
+    if (isSignup) {
+      // Validate password match
+      if (passwordValue !== passwordConfirm) {
+        setError('Passwords do not match');
+        shakeError();
+        return;
+      }
+      // Validate strength
+      const strength = validatePassword(passwordValue);
+      if (!strength.isValid) {
+        setError(strength.issues[0] || 'Password does not meet requirements');
+        shakeError();
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      if (isSignup) {
+        const result = await createPassword(passwordEmail.trim(), passwordValue);
+        if (result.success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          // Auto-login after signup
+          const loginResult = await verifyPasswordAndAuth(passwordEmail.trim(), passwordValue);
+          if (loginResult.mfaRequired) {
+            setMfaMethod(loginResult.mfaMethods?.[0] || 'totp');
+            setMfaCode('');
+            setScreen('mfa_verify');
+            animateIn();
+          } else {
+            setScreen('setup_name');
+            animateIn();
+          }
+        } else {
+          setError(result.error || 'Failed to create account');
+          shakeError();
+        }
+      } else {
+        const result = await verifyPasswordAndAuth(passwordEmail.trim(), passwordValue);
+        if (result.success) {
+          if (result.mfaRequired) {
+            setMfaMethod(result.mfaMethods?.[0] || 'totp');
+            setMfaCode('');
+            setScreen('mfa_verify');
+            animateIn();
+          } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setScreen('setup_name');
+            animateIn();
+          }
+        } else {
+          setError(result.error || 'Invalid email or password');
+          shakeError();
+        }
+      }
+    } catch (e) {
+      setError(e.message || 'Authentication failed');
+      shakeError();
+    }
+    setLoading(false);
+  };
+
+  const handleMFAVerify = async () => {
+    if (mfaCode.length < 6) {
+      setError('Please enter the complete code');
+      shakeError();
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await verifyMFAAndAuth(mfaMethod, mfaCode);
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setScreen('setup_name');
+        animateIn();
+      } else {
+        setError(result.error || 'Invalid MFA code');
+        shakeError();
+        setMfaCode('');
+      }
+    } catch (e) {
+      setError(e.message || 'MFA verification failed');
+      shakeError();
+      setMfaCode('');
+    }
+    setLoading(false);
+  };
+
+  // ======= MAGIC LINK FLOW =======
+
+  const handleMagicLinkScreen = () => {
+    setMagicLinkEmail('');
+    setMagicLinkSent(false);
+    setMagicLinkToken('');
+    setError('');
+    setScreen('magic_link');
+    animateIn();
+  };
+
+  const handleSendMagicLink = async () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(magicLinkEmail.trim())) {
+      setError('Please enter a valid email address');
+      shakeError();
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await sendMagicLink(magicLinkEmail.trim());
+      setMagicLinkSent(true);
+      // In demo: auto-fill the token for testing
+      if (result.token) setMagicLinkToken(result.token);
+    } catch (e) {
+      setError(e.message || 'Failed to send magic link');
+    }
+    setLoading(false);
+  };
+
+  const handleVerifyMagicLink = async () => {
+    if (!magicLinkToken.trim()) {
+      setError('Please enter the magic link token');
+      shakeError();
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await verifyMagicLinkAndAuth(magicLinkToken.trim());
+      if (result.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setScreen('setup_name');
+        animateIn();
+      } else {
+        setError(result.error || 'Invalid or expired magic link');
+        shakeError();
+      }
+    } catch (e) {
+      setError(e.message || 'Magic link verification failed');
+      shakeError();
+    }
+    setLoading(false);
   };
 
   // ======= PIN FLOW (existing) =======
@@ -406,9 +637,9 @@ export default function AuthScreen({ onDuressTriggered }) {
   const verifyEnteredPin = async (enteredValue) => {
     const result = verifyPin(enteredValue);
     if (result === 'normal') {
-      await handleSuccessfulAuth('pin');
+      await handleSuccessfulAuth('pin', {});
     } else if (result === 'duress') {
-      await handleSuccessfulAuth('pin');
+      await handleSuccessfulAuth('pin', {}, true);
       if (onDuressTriggered) onDuressTriggered();
       enterDuressMode();
     } else {
@@ -461,10 +692,6 @@ export default function AuthScreen({ onDuressTriggered }) {
     try {
       await setupPin(newPin);
       await socialLogin('pin', { method: 'pin' });
-      try {
-        const { UserDB } = await safeDB();
-        if (UserDB) await UserDB.save({ authMethod: 'pin', pinSetAt: new Date().toISOString() });
-      } catch (e) {}
 
       if (hasBiometric) {
         setScreen('biometric_setup');
@@ -487,10 +714,6 @@ export default function AuthScreen({ onDuressTriggered }) {
         });
         if (result.success) {
           await toggleBiometric(true);
-          try {
-            const { UserDB } = await safeDB();
-            if (UserDB) await UserDB.save({ biometricEnabled: true });
-          } catch (e) {}
         }
       } catch (e) {
         console.log('Bio setup error:', e);
@@ -506,15 +729,11 @@ export default function AuthScreen({ onDuressTriggered }) {
       const trimmedName = name.trim();
       if (trimmedName) {
         await updateProfile({ fullName: trimmedName });
-        try {
-          const { UserDB } = await safeDB();
-          if (UserDB) await UserDB.save({ fullName: trimmedName });
-        } catch (e) {}
       }
-      await handleSuccessfulAuth(otpMethod || socialProvider || 'pin');
+      await handleSuccessfulAuth(otpMethod || socialProvider || 'pin', {});
     } catch (e) {
       console.error('Setup complete error:', e);
-      await handleSuccessfulAuth('unknown');
+      await handleSuccessfulAuth('unknown', {});
     }
     setLoading(false);
   };
@@ -523,28 +742,16 @@ export default function AuthScreen({ onDuressTriggered }) {
     setLoading(true);
     try {
       await socialLogin('quick', { method: 'quick_start' });
-      try {
-        const { UserDB, SessionsDB } = await safeDB();
-        if (UserDB) await UserDB.save({ authMethod: 'quick_start' });
-        if (SessionsDB) await SessionsDB.start();
-      } catch (e) {}
-      authenticate();
+      await authenticate('quick', {});
     } catch (e) {
-      authenticate();
+      await authenticate('quick', {});
     }
     setLoading(false);
   };
 
-  const handleSuccessfulAuth = async (method) => {
-    try {
-      const { UserDB, SessionsDB } = await safeDB();
-      if (SessionsDB) await SessionsDB.start();
-      if (UserDB) await UserDB.save({ lastLogin: new Date().toISOString(), loginMethod: method });
-    } catch (e) {
-      console.log('Session save error:', e);
-    }
+  const handleSuccessfulAuth = async (method, extra = {}, isDuress = false) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    authenticate();
+    await authenticate(method, extra, isDuress);
   };
 
   const handleForgotPin = () => {
@@ -582,7 +789,18 @@ export default function AuthScreen({ onDuressTriggered }) {
     setEmailAddress('');
     setOtpValue('');
     setOtpAttempts(0);
+    setSocialEmail('');
+    setSocialName('');
+    setPasswordEmail('');
+    setPasswordValue('');
+    setPasswordConfirm('');
+    setPasswordStrength(null);
+    setMfaCode('');
+    setMagicLinkEmail('');
+    setMagicLinkSent(false);
+    setMagicLinkToken('');
     if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+    if (autoFillTimerRef.current) clearTimeout(autoFillTimerRef.current);
     setScreen('welcome');
     animateIn();
   };
@@ -694,7 +912,7 @@ export default function AuthScreen({ onDuressTriggered }) {
           <Text style={styles.appSubtitle}>Your Personal Safety Guardian</Text>
         </View>
 
-        {/* Social Login Buttons */}
+        {/* Social Login Buttons (OAuth 2.0 + OIDC) */}
         <View style={styles.socialSection}>
           <TouchableOpacity
             style={[styles.socialBtn, { backgroundColor: '#DB4437' }]}
@@ -715,18 +933,71 @@ export default function AuthScreen({ onDuressTriggered }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.socialBtn, { backgroundColor: '#E4405F' }]}
-            onPress={() => handleSocialLogin('instagram')}
+            style={[styles.socialBtn, { backgroundColor: '#000000' }]}
+            onPress={() => handleSocialLogin('apple')}
             activeOpacity={0.8}
           >
-            <Ionicons name="logo-instagram" size={22} color="#FFF" />
-            <Text style={styles.socialBtnText}>Continue with Instagram</Text>
+            <Ionicons name="logo-apple" size={22} color="#FFF" />
+            <Text style={styles.socialBtnText}>Continue with Apple</Text>
           </TouchableOpacity>
         </View>
 
-        {renderDivider('or')}
+        {renderDivider('or sign in with')}
 
-        {/* Phone & Email Login */}
+        {/* Passkey (WebAuthn/FIDO2) */}
+        {passkeyAvailable && (
+          <TouchableOpacity
+            style={[styles.otpMethodBtn, { borderColor: '#6C63FF', marginBottom: 10 }]}
+            onPress={handlePasskeyAuth}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.otpIconCircle, { backgroundColor: '#6C63FF15' }]}>
+              <Ionicons name="finger-print" size={20} color="#6C63FF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.otpMethodTitle}>Passkey {passkeyRegistered ? '' : '(New)'}</Text>
+              <Text style={styles.otpMethodSub}>WebAuthn / FIDO2 biometric login</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+        )}
+
+        {/* Password + MFA */}
+        <View style={styles.otpSection}>
+          <TouchableOpacity
+            style={[styles.otpMethodBtn, { borderColor: '#7B1FA2' }]}
+            onPress={() => handlePasswordScreen(false)}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.otpIconCircle, { backgroundColor: '#7B1FA215' }]}>
+              <Ionicons name="key" size={20} color="#7B1FA2" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.otpMethodTitle}>Password Login</Text>
+              <Text style={styles.otpMethodSub}>Email & password with MFA</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.otpMethodBtn, { borderColor: '#FF6F00' }]}
+            onPress={handleMagicLinkScreen}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.otpIconCircle, { backgroundColor: '#FF6F0015' }]}>
+              <Ionicons name="link" size={20} color="#FF6F00" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.otpMethodTitle}>Magic Link</Text>
+              <Text style={styles.otpMethodSub}>Passwordless email login</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+        </View>
+
+        {renderDivider('or use OTP')}
+
+        {/* Phone & Email OTP */}
         <View style={styles.otpSection}>
           <TouchableOpacity
             style={[styles.otpMethodBtn, { borderColor: '#00C853' }]}
@@ -761,7 +1032,7 @@ export default function AuthScreen({ onDuressTriggered }) {
 
         {renderDivider('or')}
 
-        {/* PIN & Quick Start */}
+        {/* PIN, Create Account & Quick Start */}
         <View style={styles.pinSection}>
           <TouchableOpacity
             style={styles.primaryBtn}
@@ -770,6 +1041,15 @@ export default function AuthScreen({ onDuressTriggered }) {
           >
             <Ionicons name="lock-closed" size={20} color={COLORS.white} style={{ marginRight: 10 }} />
             <Text style={styles.primaryBtnText}>Set Up PIN</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.secondaryBtn, { borderColor: '#7B1FA2' }]}
+            onPress={() => handlePasswordScreen(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="person-add" size={20} color="#7B1FA2" style={{ marginRight: 10 }} />
+            <Text style={[styles.secondaryBtnText, { color: '#7B1FA2' }]}>Create Account (Email & Password)</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -898,7 +1178,7 @@ export default function AuthScreen({ onDuressTriggered }) {
   const renderOTPVerify = () => {
     const destination = otpMethod === 'phone'
       ? '+91 ' + phoneNumber.replace(/\D/g, '').slice(0, 5) + ' \u2022\u2022\u2022\u2022\u2022'
-      : emailAddress.replace(/(.{3}).+(@.+)/, '\u2022\u2022\u2022');
+      : emailAddress.replace(/(.{3}).+(@.+)/, '$1\u2022\u2022\u2022$2');
 
     return (
       <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
@@ -978,6 +1258,71 @@ export default function AuthScreen({ onDuressTriggered }) {
               </TouchableOpacity>
             )}
           </View>
+
+          {renderBackButton()}
+        </KeyboardAvoidingView>
+      </Animated.View>
+    );
+  };
+
+  // ======= SOCIAL ACCOUNT INPUT SCREEN =======
+  const renderSocialAccountInput = () => {
+    const providerConfig = {
+      google: { color: '#DB4437', icon: 'logo-google', label: 'Google', emailPlaceholder: 'Enter your Gmail address' },
+      facebook: { color: '#1877F2', icon: 'logo-facebook', label: 'Facebook', emailPlaceholder: 'Enter your Facebook email' },
+      instagram: { color: '#E4405F', icon: 'logo-instagram', label: 'Instagram', emailPlaceholder: 'Enter your Instagram email' },
+    };
+    const config = providerConfig[socialProvider] || providerConfig.google;
+
+    return (
+      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.otpContent}>
+          <View style={styles.otpTop}>
+            <View style={[styles.socialLoadingIcon, { backgroundColor: config.color }]}>
+              <Ionicons name={config.icon} size={48} color="#FFF" />
+            </View>
+            <Text style={styles.loginTitle}>{'Sign in with ' + config.label}</Text>
+            <Text style={styles.loginSubtitle}>{'Enter your ' + config.label + ' account details to continue'}</Text>
+          </View>
+
+          <TextInput
+            style={styles.emailInput}
+            placeholder={config.emailPlaceholder}
+            placeholderTextColor={COLORS.textLight}
+            value={socialEmail}
+            onChangeText={(text) => { setSocialEmail(text); setError(''); }}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            maxLength={100}
+          />
+
+          <TextInput
+            style={[styles.emailInput, { marginTop: 12 }]}
+            placeholder="Enter your name"
+            placeholderTextColor={COLORS.textLight}
+            value={socialName}
+            onChangeText={setSocialName}
+            maxLength={50}
+          />
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          <TouchableOpacity
+            style={[styles.primaryBtn, { marginTop: 24, backgroundColor: config.color }, !socialEmail.trim() && styles.btnDisabled]}
+            onPress={completeSocialLogin}
+            disabled={loading || !socialEmail.trim()}
+          >
+            {loading ? (
+              <ActivityIndicator color={COLORS.white} size="small" />
+            ) : (
+              <>
+                <Ionicons name={config.icon} size={20} color="#FFF" style={{ marginRight: 10 }} />
+                <Text style={styles.primaryBtnText}>{'Continue with ' + config.label}</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
           {renderBackButton()}
         </KeyboardAvoidingView>
@@ -1149,6 +1494,377 @@ export default function AuthScreen({ onDuressTriggered }) {
     </Animated.View>
   );
 
+  // ======= PASSKEY REGISTER SCREEN =======
+  const renderPasskeyRegister = () => (
+    <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+      <View style={styles.bioSetupContent}>
+        <View style={[styles.socialLoadingIcon, { backgroundColor: '#6C63FF' }]}>
+          <Ionicons name="finger-print" size={56} color="#FFF" />
+        </View>
+        <Text style={styles.loginTitle}>Set Up Passkey</Text>
+        <Text style={styles.loginSubtitle}>
+          Register a passkey using your device biometrics.{'\n'}
+          Fast, secure, and passwordless authentication.
+        </Text>
+
+        <View style={styles.passkeyFeatures}>
+          <View style={styles.featureRow}>
+            <Ionicons name="shield-checkmark" size={20} color="#6C63FF" />
+            <Text style={styles.featureText}>FIDO2 / WebAuthn standard</Text>
+          </View>
+          <View style={styles.featureRow}>
+            <Ionicons name="finger-print" size={20} color="#6C63FF" />
+            <Text style={styles.featureText}>Biometric verification required</Text>
+          </View>
+          <View style={styles.featureRow}>
+            <Ionicons name="key" size={20} color="#6C63FF" />
+            <Text style={styles.featureText}>Cryptographic key pair on device</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.primaryBtn, { marginTop: 32, backgroundColor: '#6C63FF' }]}
+          onPress={handlePasskeyRegister}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={COLORS.white} size="small" />
+          ) : (
+            <>
+              <Ionicons name="finger-print" size={22} color={COLORS.white} style={{ marginRight: 10 }} />
+              <Text style={styles.primaryBtnText}>Register Passkey</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {error ? <Text style={[styles.errorText, { marginTop: 16 }]}>{error}</Text> : null}
+        {renderBackButton()}
+      </View>
+    </Animated.View>
+  );
+
+  // ======= PASSWORD AUTH SCREEN =======
+  const renderPasswordAuth = () => {
+    const strengthColors = ['#F44336', '#FF9800', '#FFC107', '#8BC34A', '#4CAF50'];
+    const strengthLabels = ['Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+
+    return (
+      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.otpContent}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <View style={styles.otpTop}>
+              <View style={[styles.otpBigIcon, { backgroundColor: '#7B1FA215' }]}>
+                <Ionicons name={isSignup ? 'person-add' : 'key'} size={48} color="#7B1FA2" />
+              </View>
+              <Text style={styles.loginTitle}>{isSignup ? 'Create Account' : 'Password Login'}</Text>
+              <Text style={styles.loginSubtitle}>
+                {isSignup
+                  ? 'Create a secure account with email & password'
+                  : 'Sign in with your email & password'}
+              </Text>
+            </View>
+
+            <TextInput
+              style={styles.emailInput}
+              placeholder="Email address"
+              placeholderTextColor={COLORS.textLight}
+              value={passwordEmail}
+              onChangeText={(t) => { setPasswordEmail(t); setError(''); }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              maxLength={100}
+            />
+
+            <View style={styles.passwordRow}>
+              <TextInput
+                style={[styles.emailInput, { flex: 1, marginTop: 12 }]}
+                placeholder="Password"
+                placeholderTextColor={COLORS.textLight}
+                value={passwordValue}
+                onChangeText={(t) => {
+                  setPasswordValue(t);
+                  setError('');
+                  if (isSignup && t) {
+                    setPasswordStrength(validatePassword(t));
+                  } else {
+                    setPasswordStrength(null);
+                  }
+                }}
+                secureTextEntry={!showPassword}
+                maxLength={128}
+              />
+              <TouchableOpacity
+                style={styles.eyeBtn}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={22} color={COLORS.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            {isSignup && passwordStrength && (
+              <View style={styles.strengthContainer}>
+                <View style={styles.strengthBarBg}>
+                  <View style={[
+                    styles.strengthBarFill,
+                    {
+                      width: Math.min(100, (passwordStrength.score / 7) * 100) + '%',
+                      backgroundColor: strengthColors[Math.min(Math.floor(passwordStrength.score / 2), 4)],
+                    },
+                  ]} />
+                </View>
+                <Text style={[
+                  styles.strengthLabel,
+                  { color: strengthColors[Math.min(Math.floor(passwordStrength.score / 2), 4)] },
+                ]}>
+                  {strengthLabels[Math.min(Math.floor(passwordStrength.score / 2), 4)]}
+                </Text>
+                {passwordStrength.issues?.length > 0 && (
+                  <Text style={styles.strengthIssue}>{passwordStrength.issues[0]}</Text>
+                )}
+              </View>
+            )}
+
+            {isSignup && (
+              <TextInput
+                style={[styles.emailInput, { marginTop: 12 }]}
+                placeholder="Confirm password"
+                placeholderTextColor={COLORS.textLight}
+                value={passwordConfirm}
+                onChangeText={(t) => { setPasswordConfirm(t); setError(''); }}
+                secureTextEntry={!showPassword}
+                maxLength={128}
+              />
+            )}
+
+            {error ? <Text style={[styles.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, { marginTop: 24, backgroundColor: '#7B1FA2' },
+                (!passwordEmail.trim() || !passwordValue) && styles.btnDisabled]}
+              onPress={handlePasswordAction}
+              disabled={loading || !passwordEmail.trim() || !passwordValue}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} size="small" />
+              ) : (
+                <>
+                  <Ionicons name={isSignup ? 'person-add' : 'log-in'} size={20} color="#FFF" style={{ marginRight: 10 }} />
+                  <Text style={styles.primaryBtnText}>{isSignup ? 'Create Account' : 'Sign In'}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ alignItems: 'center', marginTop: 16 }}
+              onPress={() => { setIsSignup(!isSignup); setError(''); setPasswordStrength(null); }}
+            >
+              <Text style={styles.resendLink}>
+                {isSignup ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+              </Text>
+            </TouchableOpacity>
+
+            {renderBackButton()}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    );
+  };
+
+  // ======= MFA VERIFY SCREEN =======
+  const renderMFAVerify = () => {
+    const mfaConfigs = {
+      totp: { icon: 'time', color: '#009688', label: 'Authenticator App', hint: 'Enter the 6-digit code from your authenticator app' },
+      sms: { icon: 'chatbubble-ellipses', color: '#00C853', label: 'SMS Code', hint: 'Enter the 6-digit code sent to your phone' },
+      email: { icon: 'mail', color: '#2196F3', label: 'Email Code', hint: 'Enter the 6-digit code sent to your email' },
+      biometric: { icon: 'finger-print', color: '#6C63FF', label: 'Biometric', hint: 'Verify with your fingerprint or face' },
+      recovery: { icon: 'key', color: '#FF5722', label: 'Recovery Code', hint: 'Enter one of your 8-character recovery codes' },
+    };
+    const config = mfaConfigs[mfaMethod] || mfaConfigs.totp;
+    const availableMethods = pendingMFA?.methods || [];
+
+    return (
+      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.otpContent}>
+          <View style={styles.otpTop}>
+            <View style={[styles.otpBigIcon, { backgroundColor: config.color + '15' }]}>
+              <Ionicons name={config.icon} size={48} color={config.color} />
+            </View>
+            <Text style={styles.loginTitle}>Two-Factor Auth</Text>
+            <Text style={styles.loginSubtitle}>{config.hint}</Text>
+          </View>
+
+          {mfaMethod === 'biometric' ? (
+            <TouchableOpacity
+              style={[styles.primaryBtn, { backgroundColor: config.color }]}
+              onPress={() => handleMFAVerify()}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="finger-print" size={22} color="#FFF" style={{ marginRight: 10 }} />
+                  <Text style={styles.primaryBtnText}>Verify Biometric</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <>
+              <TextInput
+                style={[styles.emailInput, { textAlign: 'center', fontSize: 22, letterSpacing: 8, fontWeight: '700' }]}
+                placeholder={mfaMethod === 'recovery' ? 'XXXXXXXX' : '000000'}
+                placeholderTextColor={COLORS.textLight}
+                value={mfaCode}
+                onChangeText={(t) => { setMfaCode(t.replace(/[^a-zA-Z0-9]/g, '')); setError(''); }}
+                keyboardType={mfaMethod === 'recovery' ? 'default' : 'number-pad'}
+                maxLength={mfaMethod === 'recovery' ? 8 : 6}
+                autoFocus
+              />
+
+              {error ? <Text style={[styles.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, { marginTop: 24, backgroundColor: config.color },
+                  mfaCode.length < (mfaMethod === 'recovery' ? 8 : 6) && styles.btnDisabled]}
+                onPress={handleMFAVerify}
+                disabled={loading || mfaCode.length < (mfaMethod === 'recovery' ? 8 : 6)}
+              >
+                {loading ? (
+                  <ActivityIndicator color={COLORS.white} size="small" />
+                ) : (
+                  <Text style={styles.primaryBtnText}>Verify & Continue</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* Switch MFA method */}
+          {availableMethods.length > 1 && (
+            <View style={styles.mfaSwitchContainer}>
+              <Text style={styles.mfaSwitchLabel}>Use a different method:</Text>
+              <View style={styles.mfaSwitchRow}>
+                {availableMethods.filter(m => m !== mfaMethod).map((m) => (
+                  <TouchableOpacity
+                    key={m}
+                    style={styles.mfaSwitchBtn}
+                    onPress={() => { setMfaMethod(m); setMfaCode(''); setError(''); }}
+                  >
+                    <Ionicons name={(mfaConfigs[m] || mfaConfigs.totp).icon} size={18} color={COLORS.primary} />
+                    <Text style={styles.mfaSwitchText}>{(mfaConfigs[m] || mfaConfigs.totp).label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Recovery code fallback */}
+          {mfaMethod !== 'recovery' && (
+            <TouchableOpacity
+              style={{ alignItems: 'center', marginTop: 16 }}
+              onPress={() => { setMfaMethod('recovery'); setMfaCode(''); setError(''); }}
+            >
+              <Text style={styles.resendLink}>Use recovery code</Text>
+            </TouchableOpacity>
+          )}
+
+          {renderBackButton()}
+        </KeyboardAvoidingView>
+      </Animated.View>
+    );
+  };
+
+  // ======= MAGIC LINK SCREEN =======
+  const renderMagicLink = () => (
+    <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.otpContent}>
+        <View style={styles.otpTop}>
+          <View style={[styles.otpBigIcon, { backgroundColor: '#FF6F0015' }]}>
+            <Ionicons name={magicLinkSent ? 'mail-open' : 'link'} size={48} color="#FF6F00" />
+          </View>
+          <Text style={styles.loginTitle}>{magicLinkSent ? 'Check Your Email' : 'Magic Link Login'}</Text>
+          <Text style={styles.loginSubtitle}>
+            {magicLinkSent
+              ? 'We sent a magic link to your email.\nClick it or paste the token below.'
+              : 'Enter your email and we\'ll send you a sign-in link — no password needed!'}
+          </Text>
+        </View>
+
+        {!magicLinkSent ? (
+          <>
+            <TextInput
+              style={styles.emailInput}
+              placeholder="Enter your email address"
+              placeholderTextColor={COLORS.textLight}
+              value={magicLinkEmail}
+              onChangeText={(t) => { setMagicLinkEmail(t); setError(''); }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              maxLength={100}
+            />
+
+            {error ? <Text style={[styles.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, { marginTop: 24, backgroundColor: '#FF6F00' },
+                !magicLinkEmail.trim() && styles.btnDisabled]}
+              onPress={handleSendMagicLink}
+              disabled={loading || !magicLinkEmail.trim()}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="send" size={20} color="#FFF" style={{ marginRight: 10 }} />
+                  <Text style={styles.primaryBtnText}>Send Magic Link</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TextInput
+              style={[styles.emailInput, { textAlign: 'center', fontSize: 14 }]}
+              placeholder="Paste magic link token here"
+              placeholderTextColor={COLORS.textLight}
+              value={magicLinkToken}
+              onChangeText={(t) => { setMagicLinkToken(t); setError(''); }}
+              autoFocus
+              maxLength={200}
+            />
+
+            {error ? <Text style={[styles.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, { marginTop: 24, backgroundColor: '#FF6F00' },
+                !magicLinkToken.trim() && styles.btnDisabled]}
+              onPress={handleVerifyMagicLink}
+              disabled={loading || !magicLinkToken.trim()}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} size="small" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Verify & Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ alignItems: 'center', marginTop: 16 }}
+              onPress={() => { setMagicLinkSent(false); setMagicLinkToken(''); setError(''); }}
+            >
+              <Text style={styles.resendLink}>Resend magic link</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {renderBackButton()}
+      </KeyboardAvoidingView>
+    </Animated.View>
+  );
+
   // ======= MAIN RENDER =======
   return (
     <View style={styles.container}>
@@ -1162,7 +1878,12 @@ export default function AuthScreen({ onDuressTriggered }) {
       {screen === 'phone_input' && renderPhoneInput()}
       {screen === 'email_input' && renderEmailInput()}
       {screen === 'otp_verify' && renderOTPVerify()}
+      {screen === 'social_account_input' && renderSocialAccountInput()}
       {screen === 'social_loading' && renderSocialLoading()}
+      {screen === 'passkey_register' && renderPasskeyRegister()}
+      {screen === 'password_auth' && renderPasswordAuth()}
+      {screen === 'mfa_verify' && renderMFAVerify()}
+      {screen === 'magic_link' && renderMagicLink()}
     </View>
   );
 }
@@ -1633,5 +2354,85 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 12,
+  },
+  // ── Passkey Styles ──
+  passkeyFeatures: {
+    marginTop: 24,
+    gap: 12,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  featureText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  // ── Password Styles ──
+  passwordRow: {
+    position: 'relative',
+  },
+  eyeBtn: {
+    position: 'absolute',
+    right: 14,
+    top: 24,
+  },
+  strengthContainer: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  strengthBarBg: {
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  strengthBarFill: {
+    height: 4,
+    borderRadius: 2,
+  },
+  strengthLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  strengthIssue: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginTop: 2,
+  },
+  // ── MFA Styles ──
+  mfaSwitchContainer: {
+    marginTop: 24,
+    alignItems: 'center',
+  },
+  mfaSwitchLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  mfaSwitchRow: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  mfaSwitchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  mfaSwitchText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '600',
   },
 });

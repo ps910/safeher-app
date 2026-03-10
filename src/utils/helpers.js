@@ -1,6 +1,6 @@
 /**
  * Utility Helpers - Emergency calls, SMS, location, siren, recording
- * v5.0 — Auto SOS Messaging with SMS fallback + Live Location
+ * v6.0 — Global emergency numbers + volume SOS trigger + accessibility
  */
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
@@ -8,18 +8,35 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as SMS from 'expo-sms';
 import { Alert, Platform, Vibration } from 'react-native';
+import {
+  getEmergencyNumbers,
+  getDisplayHelplines,
+  detectCountryCode,
+  getEmergencyDataForCountry,
+  getSupportedCountries,
+  COUNTRY_EMERGENCY_DATA,
+  INTERNATIONAL_FALLBACK,
+} from '../constants/globalEmergencyNumbers';
 
-// ─── Emergency Numbers (India) ───────────────────────────────────
-export const EMERGENCY_NUMBERS = {
-  police: '100',
-  ambulance: '108',
-  fire: '101',
-  womenHelpline: '1091',
-  childHelpline: '1098',
-  nationalEmergency: '112',
-  womenCommission: '7827170170',
-  cybercrime: '1930',
+// ─── Emergency Numbers (auto-detect country) ─────────────────────
+// Legacy alias — now dynamically resolved via detectCountryCode()
+let _cachedCountry = null;
+let _cachedNumbers = null;
+
+export const getLocalEmergencyNumbers = (countryOverride = null) => {
+  const code = countryOverride || _cachedCountry;
+  if (!countryOverride && _cachedNumbers) return _cachedNumbers;
+  const nums = getEmergencyNumbers(code);
+  if (!countryOverride) { _cachedNumbers = nums; _cachedCountry = detectCountryCode(); }
+  return nums;
 };
+
+export const getLocalDisplayHelplines = (countryOverride = null) => {
+  return getDisplayHelplines(countryOverride);
+};
+
+// Backwards-compatible export (defaults to detected country)
+export const EMERGENCY_NUMBERS = getEmergencyNumbers();
 
 // ─── Network Connectivity Check ──────────────────────────────────
 export const checkNetworkStatus = async () => {
@@ -547,4 +564,42 @@ export const shareJourneySOSToContacts = async (contacts, journeyData, userMessa
     success: results.whatsapp || results.sms,
     ...results,
   };
+};
+
+// ─── Volume Button SOS Trigger ───────────────────────────────────
+// Detects rapid volume button presses as an SOS trigger.
+// Must be wired up from the component that calls useEffect with volume listener.
+let _volumePressTimestamps = [];
+const VOLUME_SOS_THRESHOLD = 5;      // 5 presses
+const VOLUME_SOS_WINDOW_MS = 3000;   // within 3 seconds
+
+export const handleVolumePress = (onSOSTrigger) => {
+  const now = Date.now();
+  _volumePressTimestamps.push(now);
+
+  // Keep only presses within the time window
+  _volumePressTimestamps = _volumePressTimestamps.filter(
+    t => now - t < VOLUME_SOS_WINDOW_MS
+  );
+
+  if (_volumePressTimestamps.length >= VOLUME_SOS_THRESHOLD) {
+    _volumePressTimestamps = [];
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (onSOSTrigger) onSOSTrigger();
+    return true;
+  }
+  return false;
+};
+
+export const resetVolumePress = () => {
+  _volumePressTimestamps = [];
+};
+
+// ─── Re-export global emergency helpers ──────────────────────────
+export {
+  detectCountryCode,
+  getEmergencyDataForCountry,
+  getSupportedCountries,
+  COUNTRY_EMERGENCY_DATA,
+  INTERNATIONAL_FALLBACK,
 };

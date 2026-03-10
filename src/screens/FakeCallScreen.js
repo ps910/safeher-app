@@ -18,10 +18,13 @@ import {
   Dimensions,
   PanResponder,
   Easing,
+  Image,
 } from 'react-native';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+import { useTheme } from '../constants/theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -47,6 +50,7 @@ const DELAY_OPTIONS = [
 ];
 
 const FakeCallScreen = ({ navigation }) => {
+  const { colors: themeColors, isDark } = useTheme();
   // ── State ──
   const [selectedCaller, setSelectedCaller] = useState(PRESET_CALLERS[0]);
   const [selectedDelay, setSelectedDelay] = useState(0);
@@ -55,7 +59,7 @@ const FakeCallScreen = ({ navigation }) => {
   const [callDuration, setCallDuration] = useState(0);
   const [countdown, setCountdown] = useState(null);
   const [customModalVisible, setCustomModalVisible] = useState(false);
-  const [customCaller, setCustomCaller] = useState({ name: '', number: '' });
+  const [customCaller, setCustomCaller] = useState({ name: '', number: '', photo: null });
 
   // Call features
   const [isMuted, setIsMuted] = useState(false);
@@ -64,6 +68,10 @@ const FakeCallScreen = ({ navigation }) => {
   const [showKeypad, setShowKeypad] = useState(false);
   const [dtmfDigits, setDtmfDigits] = useState('');
   const [callConnecting, setCallConnecting] = useState(false);
+
+  // Ringtone audio
+  const ringtoneRef = useRef(null);
+  const ringLoopRef = useRef(null);
 
   // Animations
   const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
@@ -84,10 +92,63 @@ const FakeCallScreen = ({ navigation }) => {
   useEffect(() => {
     return () => {
       Vibration.cancel();
+      stopRingtone();
       if (pulseAnimRef.current) pulseAnimRef.current.stop();
       if (ringAnimRef.current) ringAnimRef.current.stop();
     };
   }, []);
+
+  // ── Ringtone audio playback ──
+  const playRingtone = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      });
+      // Generate a realistic ring pattern using 440Hz + 480Hz (standard US ring)
+      // Since we can't easily generate tones, we use the built-in vibration pattern
+      // and set maximum volume ring simulation
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: 'https://actions.google.com/sounds/v1/telephones/phone_ringing.ogg' },
+        { isLooping: true, volume: 1.0, shouldPlay: true }
+      );
+      ringtoneRef.current = sound;
+    } catch (e) {
+      console.log('[FakeCall] Ringtone playback fallback (no network):', e.message);
+      // Fallback: use vibration-only pattern if audio fails
+    }
+  };
+
+  const stopRingtone = async () => {
+    try {
+      if (ringtoneRef.current) {
+        await ringtoneRef.current.stopAsync();
+        await ringtoneRef.current.unloadAsync();
+        ringtoneRef.current = null;
+      }
+    } catch (e) {
+      console.log('[FakeCall] Ringtone stop error:', e.message);
+    }
+  };
+
+  // ── Custom caller photo picker ──
+  const pickCallerPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        setCustomCaller(prev => ({ ...prev, photo: result.assets[0].uri }));
+      }
+    } catch (e) {
+      console.log('[FakeCall] Photo pick error:', e.message);
+    }
+  };
 
   // ── Countdown timer ──
   useEffect(() => {
@@ -190,6 +251,7 @@ const FakeCallScreen = ({ navigation }) => {
     // Realistic vibration pattern
     Vibration.vibrate([0, 800, 600, 800, 600, 800], true);
     startRingAnimation();
+    playRingtone(); // Play ringtone audio
 
     slideAnim.setValue(SCREEN_H);
     Animated.spring(slideAnim, {
@@ -230,6 +292,7 @@ const FakeCallScreen = ({ navigation }) => {
   const answerCall = useCallback(() => {
     Vibration.cancel();
     stopRingAnimation();
+    stopRingtone();
     if (pulseAnimRef.current) pulseAnimRef.current.stop();
 
     setIsIncoming(false);
@@ -248,6 +311,7 @@ const FakeCallScreen = ({ navigation }) => {
   const endCall = useCallback(() => {
     Vibration.cancel();
     stopRingAnimation();
+    stopRingtone();
     if (pulseAnimRef.current) pulseAnimRef.current.stop();
 
     setIsCallActive(false);
@@ -291,9 +355,10 @@ const FakeCallScreen = ({ navigation }) => {
         number: customCaller.number.trim() || '+91 00000 00000',
         emoji: '📱',
         label: 'Mobile',
+        photo: customCaller.photo || null,
       });
       setCustomModalVisible(false);
-      setCustomCaller({ name: '', number: '' });
+      setCustomCaller({ name: '', number: '', photo: null });
     }
   };
 
@@ -356,7 +421,11 @@ const FakeCallScreen = ({ navigation }) => {
             {renderRingPulse(ringPulse2, 160)}
             {renderRingPulse(ringPulse3, 160)}
             <View style={styles.avatarCircle}>
-              <Text style={styles.avatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+              {selectedCaller.photo ? (
+                <Image source={{ uri: selectedCaller.photo }} style={styles.avatarPhoto} />
+              ) : (
+                <Text style={styles.avatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+              )}
             </View>
           </View>
 
@@ -427,7 +496,11 @@ const FakeCallScreen = ({ navigation }) => {
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
         <View style={styles.activeCallBody}>
           <View style={styles.activeAvatarCircle}>
-            <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+            {selectedCaller.photo ? (
+              <Image source={{ uri: selectedCaller.photo }} style={styles.activeAvatarPhoto} />
+            ) : (
+              <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+            )}
           </View>
           <Text style={styles.activeCallerName}>{selectedCaller.name}</Text>
           <Text style={styles.activeCallStatus}>Connecting...</Text>
@@ -467,7 +540,11 @@ const FakeCallScreen = ({ navigation }) => {
           {!showKeypad && (
             <>
               <View style={styles.activeAvatarCircle}>
-                <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+                {selectedCaller.photo ? (
+                  <Image source={{ uri: selectedCaller.photo }} style={styles.activeAvatarPhoto} />
+                ) : (
+                  <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+                )}
               </View>
               <Text style={styles.activeCallerName}>{selectedCaller.name}</Text>
             </>
@@ -758,6 +835,25 @@ const FakeCallScreen = ({ navigation }) => {
               />
             </View>
 
+            {/* Caller Photo Picker */}
+            <View style={styles.modalField}>
+              <Text style={styles.modalLabel}>Caller Photo (optional)</Text>
+              <TouchableOpacity
+                style={styles.photoPickerBtn}
+                onPress={pickCallerPhoto}
+                accessibilityLabel="Pick caller photo from gallery"
+              >
+                {customCaller.photo ? (
+                  <Image source={{ uri: customCaller.photo }} style={styles.photoPickerPreview} />
+                ) : (
+                  <View style={styles.photoPickerPlaceholder}>
+                    <Ionicons name="camera" size={24} color={COLORS.textLight} />
+                    <Text style={styles.photoPickerText}>Choose Photo</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.modalBtns}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
@@ -836,6 +932,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#3d5afe',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarPhoto: {
+    width: 90, height: 90, borderRadius: 45,
   },
   avatarLetter: {
     fontSize: 38,
@@ -952,6 +1052,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    overflow: 'hidden',
+  },
+  activeAvatarPhoto: {
+    width: 80, height: 80, borderRadius: 40,
   },
   activeAvatarLetter: {
     fontSize: 34,
@@ -1376,6 +1480,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  // Photo picker
+  photoPickerBtn: {
+    height: 80, borderRadius: 14,
+    borderWidth: 1.5, borderColor: COLORS.border, borderStyle: 'dashed',
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: COLORS.background, overflow: 'hidden',
+  },
+  photoPickerPreview: {
+    width: '100%', height: '100%', borderRadius: 14,
+  },
+  photoPickerPlaceholder: {
+    alignItems: 'center', gap: 4,
+  },
+  photoPickerText: {
+    fontSize: 11, color: COLORS.textLight, fontWeight: '600',
   },
 });
 

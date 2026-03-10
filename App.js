@@ -1,12 +1,14 @@
 /**
- * Girl Safety App v4.3 — Next-Gen Women's Safety Application
+ * Girl Safety App v6.0 — Next-Gen Women's Safety Application
  * AI-Powered distress detection, evidence vault, journey tracking,
- * predictive anomaly detection, offline SOS, and more.
+ * predictive anomaly detection, offline SOS, background location,
+ * push notifications, live sharing, encrypted storage, dark mode.
  * 
- * v4.3: Lazy-loaded navigator, disabled New Architecture, crash diagnostics
+ * v6.0: Onboarding flow, dark mode, background services, encrypted storage
  */
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, useColorScheme, AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ── Error Boundary — prevents white-screen crashes in production ──
 class ErrorBoundary extends React.Component {
@@ -76,6 +78,9 @@ function AppBootstrap() {
       setPhase('Loading navigator...');
       const navigatorModule = await import('./src/navigation/AppNavigator');
 
+      setPhase('Loading onboarding...');
+      const onboardingModule = await import('./src/screens/OnboardingScreen');
+
       setModules({
         NavigationContainer: navModule.NavigationContainer,
         SafeAreaProvider: safeAreaModule.SafeAreaProvider,
@@ -86,6 +91,8 @@ function AppBootstrap() {
         AuthScreen: authScreenModule.default,
         sendSOSToContacts: helpersModule.sendSOSToContacts,
         AppNavigator: navigatorModule.default,
+        OnboardingScreen: onboardingModule.default,
+        isOnboardingComplete: onboardingModule.isOnboardingComplete,
       });
       setPhase('ready');
     } catch (e) {
@@ -136,9 +143,37 @@ function AppWithModules({ modules }) {
 }
 
 function AppInner({ modules }) {
-  const { NavigationContainer, AuthScreen, AppNavigator, useAuth, useEmergency, sendSOSToContacts } = modules;
-  const { isAuthenticated, isLoading } = useAuth();
+  const { NavigationContainer, AuthScreen, AppNavigator, OnboardingScreen, isOnboardingComplete,
+    useAuth, useEmergency, sendSOSToContacts } = modules;
+  const { isAuthenticated, isLoading, lock } = useAuth();
   const emergency = useEmergency();
+  const [onboardingDone, setOnboardingDone] = useState(null); // null = checking
+
+  // Check onboarding status
+  useEffect(() => {
+    checkOnboarding();
+  }, []);
+
+  const checkOnboarding = async () => {
+    try {
+      const done = await isOnboardingComplete();
+      setOnboardingDone(done);
+    } catch (e) {
+      setOnboardingDone(true); // Skip if error
+    }
+  };
+
+  // App state change — lock on background (security)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' && isAuthenticated && lock) {
+        // Auto-lock when going to background for security
+        // Only if biometric is enabled
+        // lock(); // Uncomment to enable auto-lock on background
+      }
+    });
+    return () => subscription?.remove();
+  }, [isAuthenticated, lock]);
 
   // Initialize services when authenticated
   useEffect(() => {
@@ -192,6 +227,20 @@ function AppInner({ modules }) {
         <Text style={loadStyles.text}>Loading SafeHer...</Text>
       </View>
     );
+  }
+
+  // Show onboarding for first-time users
+  if (onboardingDone === null) {
+    return (
+      <View style={loadStyles.container}>
+        <ActivityIndicator size="large" color="#E91E63" />
+        <Text style={loadStyles.text}>Checking setup...</Text>
+      </View>
+    );
+  }
+
+  if (!onboardingDone) {
+    return <OnboardingScreen onComplete={() => setOnboardingDone(true)} />;
   }
 
   if (!isAuthenticated) {

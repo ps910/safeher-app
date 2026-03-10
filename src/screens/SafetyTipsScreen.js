@@ -2,7 +2,7 @@
  * Safety Tips Screen v2.0 - Comprehensive safety guide with beautiful UI
  * Covers: Physical, Digital, Dating, Home, Workplace, Emergency, Hidden Camera safety
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,13 @@ import {
   Animated,
   Dimensions,
   Linking,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+import { useTheme } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -357,10 +361,86 @@ const SAFETY_CATEGORIES = [
   },
 ];
 
+const TIPS_CACHE_KEY = '@gs_safety_tips_cache';
+const TIPS_API_URL = 'https://safeher.app/api/v1/safety-tips'; // CMS endpoint
+const TIPS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
 const SafetyTipsScreen = ({ navigation }) => {
+  const { colors: themeColors, isDark } = useTheme();
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [expandedTip, setExpandedTip] = useState(null);
+  const [categories, setCategories] = useState(SAFETY_CATEGORIES);
+  const [isLoadingTips, setIsLoadingTips] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastFetched, setLastFetched] = useState(null);
   const scrollAnim = useRef(new Animated.Value(0)).current;
+
+  // Dynamic tips fetching with cache
+  useEffect(() => {
+    loadDynamicTips();
+  }, []);
+
+  const loadDynamicTips = async (forceRefresh = false) => {
+    try {
+      // Check cache first
+      if (!forceRefresh) {
+        const cached = await AsyncStorage.getItem(TIPS_CACHE_KEY);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < TIPS_CACHE_TTL && data?.length > 0) {
+            setCategories(data);
+            setLastFetched(new Date(timestamp));
+            return;
+          }
+        }
+      }
+
+      setIsLoadingTips(true);
+      const response = await fetch(TIPS_API_URL, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (response.ok) {
+        const remoteTips = await response.json();
+        if (remoteTips?.categories?.length > 0) {
+          // Merge: remote tips take priority, keep local for missing categories
+          const localIds = SAFETY_CATEGORIES.map(c => c.id);
+          const merged = remoteTips.categories.map(remote => {
+            const local = SAFETY_CATEGORIES.find(l => l.id === remote.id);
+            return {
+              ...local,
+              ...remote,
+              tips: remote.tips?.length > 0 ? remote.tips : (local?.tips || []),
+            };
+          });
+          // Add any local categories not in remote
+          SAFETY_CATEGORIES.forEach(local => {
+            if (!merged.find(m => m.id === local.id)) merged.push(local);
+          });
+          setCategories(merged);
+          const now = Date.now();
+          setLastFetched(new Date(now));
+          await AsyncStorage.setItem(TIPS_CACHE_KEY, JSON.stringify({
+            data: merged, timestamp: now,
+          }));
+          console.log('[SafetyTips] Loaded', merged.length, 'categories from API');
+        }
+      }
+    } catch (e) {
+      console.log('[SafetyTips] Using local tips (API unavailable):', e.message);
+      // Keep existing categories (hardcoded fallback)
+    } finally {
+      setIsLoadingTips(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadDynamicTips(true);
+  };
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -494,7 +574,7 @@ const SafetyTipsScreen = ({ navigation }) => {
   }
 
   // ─── Categories View ────────────────────────────────────────────
-  const totalTips = SAFETY_CATEGORIES.reduce((sum, cat) => sum + cat.tips.length, 0);
+  const totalTips = categories.reduce((sum, cat) => sum + cat.tips.length, 0);
 
   return (
     <View style={styles.container}>
@@ -515,16 +595,20 @@ const SafetyTipsScreen = ({ navigation }) => {
         style={styles.mainContent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.mainScrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
+        }
       >
         {/* Stats Overview */}
         <View style={[styles.overviewCard, SHADOWS.medium]}>
           <View style={styles.overviewHeader}>
             <Ionicons name="library" size={24} color={COLORS.primary} />
             <Text style={styles.overviewTitle}>Safety Knowledge Base</Text>
+            {isLoadingTips && <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />}
           </View>
           <View style={styles.overviewStats}>
             <View style={styles.overviewStatItem}>
-              <Text style={styles.overviewStatNumber}>{SAFETY_CATEGORIES.length}</Text>
+              <Text style={styles.overviewStatNumber}>{categories.length}</Text>
               <Text style={styles.overviewStatLabel}>Categories</Text>
             </View>
             <View style={styles.overviewStatDivider} />
@@ -542,7 +626,12 @@ const SafetyTipsScreen = ({ navigation }) => {
 
         {/* Category Cards */}
         <Text style={styles.sectionTitle}>Browse Categories</Text>
-        {SAFETY_CATEGORIES.map((category) => (
+        {lastFetched && (
+          <Text style={{ fontSize: 10, color: COLORS.textLight, marginHorizontal: 16, marginBottom: 8 }}>
+            Last updated: {lastFetched.toLocaleString()}
+          </Text>
+        )}
+        {categories.map((category) => (
           <TouchableOpacity
             key={category.id}
             activeOpacity={0.7}

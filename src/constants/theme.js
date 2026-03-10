@@ -1,30 +1,35 @@
 /**
  * App Theme - Colors, Fonts & Styling Constants
  * Girl Safety App — Modern, clean, empowering design system
+ * 
+ * v2.0: Dark mode support via useColorScheme()
  */
+import { useColorScheme } from 'react-native';
+import { useMemo } from 'react';
 
-export const COLORS = {
+// ─── Light Mode Colors ───────────────────────────────────────────
+export const LIGHT_COLORS = {
   // Primary palette - empowering pink/magenta
-  primary: '#E91E63',        // Pink - primary brand
-  primaryDark: '#C2185B',    // Dark pink
-  primaryLight: '#F8BBD0',   // Light pink
-  secondary: '#7C4DFF',      // Purple accent
+  primary: '#E91E63',
+  primaryDark: '#C2185B',
+  primaryLight: '#F8BBD0',
+  secondary: '#7C4DFF',
   secondaryDark: '#651FFF',
   secondaryLight: '#B388FF',
 
   // Status colors
-  danger: '#FF1744',         // Emergency red
+  danger: '#FF1744',
   dangerLight: '#FF8A80',
-  success: '#00E676',        // Green - safe
+  success: '#00E676',
   successDark: '#00C853',
-  warning: '#FFD600',        // Yellow - caution
+  warning: '#FFD600',
   warningDark: '#FFC400',
-  info: '#2196F3',           // Blue - informational
+  info: '#2196F3',
 
   // Neutrals
   white: '#FFFFFF',
-  surface: '#FFFFFF',          // Surface/card color
-  background: '#FEF0F5',     // Soft lavender blush
+  surface: '#FFFFFF',
+  background: '#FEF0F5',
   card: '#FFFFFF',
   text: '#1A1A2E',
   textSecondary: '#555770',
@@ -48,6 +53,51 @@ export const COLORS = {
   emergency: '#E65100',
   camera: '#37474F',
 };
+
+// ─── Dark Mode Colors ────────────────────────────────────────────
+export const DARK_COLORS = {
+  primary: '#F06292',
+  primaryDark: '#E91E63',
+  primaryLight: '#880E4F',
+  secondary: '#B388FF',
+  secondaryDark: '#7C4DFF',
+  secondaryLight: '#4A148C',
+
+  danger: '#FF5252',
+  dangerLight: '#FF1744',
+  success: '#69F0AE',
+  successDark: '#00E676',
+  warning: '#FFFF00',
+  warningDark: '#FFD600',
+  info: '#64B5F6',
+
+  white: '#FFFFFF',
+  surface: '#1E1E2E',
+  background: '#121218',
+  card: '#252535',
+  text: '#EAEAEF',
+  textSecondary: '#A0A0B8',
+  textLight: '#6E6E88',
+  border: '#2E2E3E',
+  shadow: '#00000060',
+  overlay: 'rgba(0,0,0,0.7)',
+
+  gradientPrimary: ['#F06292', '#C2185B'],
+  gradientSOS: ['#FF5252', '#D50000'],
+  gradientPurple: ['#B388FF', '#7C4DFF'],
+  gradientSafe: ['#69F0AE', '#00E676'],
+
+  physical: '#42A5F5',
+  digital: '#CE93D8',
+  dating: '#EF5350',
+  home: '#7E57C2',
+  workplace: '#26A69A',
+  emergency: '#FF8A65',
+  camera: '#78909C',
+};
+
+// ─── Default export (light) for backwards compatibility ──────────
+export const COLORS = LIGHT_COLORS;
 
 export const FONTS = {
   bold: 'System',
@@ -111,4 +161,21 @@ export const SHADOWS = {
     shadowRadius: 16,
     elevation: 10,
   },
+};
+
+// ─── useTheme Hook — Dark Mode Support ───────────────────────────
+/**
+ * Returns theme-aware colors based on system appearance.
+ * Usage: const { colors, isDark } = useTheme();
+ */
+export const useTheme = () => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
+  const colors = useMemo(
+    () => (isDark ? DARK_COLORS : LIGHT_COLORS),
+    [isDark]
+  );
+
+  return { colors, isDark, colorScheme };
 };

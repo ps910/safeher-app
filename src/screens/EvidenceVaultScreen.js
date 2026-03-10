@@ -796,9 +796,13 @@ export default function EvidenceVaultScreen({ navigation }) {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            try {
+              await EvidenceDB.remove(item.id);
+            } catch (e) {
+              console.error('Evidence DB delete error:', e);
+            }
             const updated = evidence.filter(e => e.id !== item.id);
             setEvidence(updated);
-            // We'd need to update DB too, but for now just filter local state
             setShowDetail(false);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           },

@@ -1,12 +1,13 @@
 /**
- * App Navigator - Bottom Tabs + Stack screens for all features
+ * App Navigator v6.0 - Bottom Tabs + Stack screens for all features
+ * Supports dark mode via useTheme hook
  */
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
-import { COLORS } from '../constants/theme';
+import { COLORS, useTheme } from '../constants/theme';
 import { useEmergency } from '../context/EmergencyContext';
 
 import HomeScreen from '../screens/HomeScreen';
@@ -39,6 +40,7 @@ const getTabIcon = (routeName, focused) => {
 
 function TabNavigator() {
   const { isSOSActive, stealthMode } = useEmergency();
+  const { colors, isDark } = useTheme();
 
   // In stealth mode change labels to be innocuous
   const homeLabel = stealthMode ? 'Calculator' : 'Home';
@@ -50,10 +52,10 @@ function TabNavigator() {
         tabBarIcon: ({ focused, color, size }) => (
           <Ionicons name={getTabIcon(route.name, focused)} size={size} color={color} />
         ),
-        tabBarActiveTintColor: isSOSActive ? COLORS.danger : COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textLight,
+        tabBarActiveTintColor: isSOSActive ? colors.danger : colors.primary,
+        tabBarInactiveTintColor: colors.textLight,
         tabBarStyle: {
-          backgroundColor: COLORS.surface,
+          backgroundColor: colors.surface,
           borderTopWidth: 0,
           borderTopColor: 'transparent',
           height: Platform.OS === 'ios' ? 88 : 68,
@@ -62,7 +64,7 @@ function TabNavigator() {
           elevation: 24,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.12,
+          shadowOpacity: isDark ? 0.3 : 0.12,
           shadowRadius: 10,
         },
         tabBarLabelStyle: {

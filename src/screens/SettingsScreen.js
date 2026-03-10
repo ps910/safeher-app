@@ -1,5 +1,5 @@
 /**
- * SettingsScreen v5.0 — Fully Functional AI-Powered Safety Settings
+ * SettingsScreen v6.0 — Fully Functional AI-Powered Safety Settings
  *
  * All toggles are LIVE and wired to real services:
  *  - Shake-to-SOS (Accelerometer monitoring)
@@ -15,6 +15,7 @@
  *  - Auto Call Police (112 after SOS sends)
  *  - Real-time AI service status badges
  *  - Test buttons for siren & shake
+ *  - v6.0: Background location, push notifications, volume SOS, live sharing
  */
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -26,8 +27,9 @@ import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { useEmergency } from '../context/EmergencyContext';
 import { useAuth } from '../context/AuthContext';
-import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, SIZES, SHADOWS, useTheme } from '../constants/theme';
 import { panicWipe } from '../utils/helpers';
+import { getSupportedCountries } from '../constants/globalEmergencyNumbers';
 import SafetyAIService from '../services/SafetyAIService';
 
 export default function SettingsScreen() {
@@ -36,7 +38,7 @@ export default function SettingsScreen() {
     settings, updateSettings, sosMessage, updateSOSMessage,
     stealthMode, toggleStealthMode, aiServiceStatus,
     isSOSActive, sirenActive, isRecording, checkIn, lastCheckIn,
-    checkInOverdue,
+    checkInOverdue, isBackgroundTracking, isLiveSharing, pushToken,
   } = useEmergency();
   const {
     biometricEnabled, toggleBiometric, hasDuressPin, setupDuressPin, lock,
@@ -327,6 +329,75 @@ export default function SettingsScreen() {
             />
           </View>
         </TouchableOpacity>
+
+        {/* ─── v6.0 Advanced Services ─── */}
+        <Section icon="rocket" iconColor="#00BFA5" title="v6.0 Advanced Services"
+          desc="Background tracking, push alerts, live sharing">
+
+          <SettingRow
+            icon="navigate-circle" iconColor="#00BFA5"
+            label="Background Location" desc="Track location even when app is closed (for SOS accuracy)"
+            value={settings.backgroundLocationEnabled} onToggle={() => toggleSetting('backgroundLocationEnabled')}
+            badge={isBackgroundTracking ? 'TRACKING' : 'OFF'}
+          />
+          <SettingRow
+            icon="notifications" iconColor="#FF6D00"
+            label="Push Notifications" desc="Receive safety alerts and send SOS push to contacts"
+            value={settings.pushNotifications} onToggle={() => toggleSetting('pushNotifications')}
+            badge={pushToken ? 'REGISTERED' : 'OFF'}
+          />
+          <SettingRow
+            icon="volume-high" iconColor="#D50000"
+            label="Volume Button SOS" desc="Press volume 5 times rapidly to trigger silent SOS"
+            value={settings.volumeButtonSOS} onToggle={() => toggleSetting('volumeButtonSOS')}
+            badge="ARMED"
+          />
+          <SettingRow
+            icon="link" iconColor="#1565C0"
+            label="Live Location Sharing" desc="Generate shareable URL during SOS for contacts without the app"
+            value={settings.liveLocationSharing} onToggle={() => toggleSetting('liveLocationSharing')}
+            badge={isLiveSharing ? 'SHARING' : 'READY'}
+          />
+          <SettingRow
+            icon="alert-circle" iconColor="#9C27B0"
+            label="Persistent SOS Notification" desc="Show quick-tap SOS button in notification tray"
+            value={settings.persistentSOSNotification} onToggle={() => toggleSetting('persistentSOSNotification')}
+            badge="TRAY"
+          />
+
+          {/* Country Picker */}
+          <View style={styles.settingRow}>
+            <View style={[styles.settingIcon, { backgroundColor: '#00695C15' }]}>
+              <Ionicons name="globe" size={20} color="#00695C" />
+            </View>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Emergency Country</Text>
+              <Text style={styles.settingDesc}>
+                {settings.countryOverride ? `Override: ${settings.countryOverride}` : 'Auto-detect from device locale'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.setupBtn}
+              onPress={() => {
+                const countries = getSupportedCountries();
+                const options = countries.map(c => ({ text: `${c.flag} ${c.name}`, onPress: () => updateSettings({ countryOverride: c.code }) }));
+                Alert.alert(
+                  '🌍 Select Country',
+                  'Choose your country for emergency numbers',
+                  [
+                    { text: '📱 Auto-Detect', onPress: () => updateSettings({ countryOverride: null }) },
+                    ...options.slice(0, 8),
+                    { text: 'Cancel', style: 'cancel' },
+                  ]
+                );
+              }}
+            >
+              <Text style={styles.setupBtnText}>
+                {settings.countryOverride || 'Auto'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </Section>
 
         {/* ─── SOS Trigger Settings ─── */}
         <Section icon="warning" iconColor="#FF1744" title="SOS Trigger Settings"
@@ -687,11 +758,12 @@ export default function SettingsScreen() {
             <MaterialCommunityIcons name="shield-check" size={32} color={COLORS.primary} />
           </View>
           <Text style={styles.aboutTitle}>SafeHer</Text>
-          <Text style={styles.aboutVersion}>Version 5.0 — AI-Powered Safety Ecosystem</Text>
+          <Text style={styles.aboutVersion}>Version 6.0 — AI-Powered Safety Ecosystem</Text>
           <Text style={styles.aboutDesc}>
             Shake detection • Scream AI • Emergency siren • Evidence recording •{'\n'}
             Live GPS tracking • Journey monitor • Stealth calculator •{'\n'}
-            Panic wipe • Biometric auth • Offline SOS • Duress PIN
+            Panic wipe • Biometric auth • Offline SOS • Duress PIN •{'\n'}
+            Background location • Push notifications • Live sharing
           </Text>
 
           <View style={styles.aboutFeatures}>
