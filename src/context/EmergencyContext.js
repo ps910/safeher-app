@@ -105,6 +105,10 @@ export const EmergencyProvider = ({ children }) => {
   // AI service status
   const [aiServiceStatus, setAiServiceStatus] = useState({});
 
+  // Security: SOS rate limiting (Vuln #10/#14)
+  const lastSOSTriggerRef = useRef(0);
+  const SOS_COOLDOWN_MS = 60000; // 60-second cooldown between SOS triggers
+
   const inactivityRef = useRef(null);
   const journeyRef = useRef(null);
   const locationWatcherRef = useRef(null);
@@ -382,6 +386,19 @@ export const EmergencyProvider = ({ children }) => {
 
   // ── SOS Trigger (v6.0 — background location SOS + live sharing + push + nearby) ──
   const triggerSOS = useCallback(async () => {
+    // Security: Rate limiting — prevent accidental/rapid SOS triggers (Vuln #10/#14)
+    const now = Date.now();
+    if (isSOSActive) {
+      console.log('[SOS] Already active — ignoring duplicate trigger');
+      return;
+    }
+    if (now - lastSOSTriggerRef.current < SOS_COOLDOWN_MS) {
+      const remaining = Math.ceil((SOS_COOLDOWN_MS - (now - lastSOSTriggerRef.current)) / 1000);
+      Alert.alert('SOS Cooldown', `Please wait ${remaining}s before triggering SOS again.`);
+      return;
+    }
+    lastSOSTriggerRef.current = now;
+
     setIsSOSActive(true);
     const entry = {
       id: Date.now().toString(),

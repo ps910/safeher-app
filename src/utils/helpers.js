@@ -134,6 +134,8 @@ export const sendSOSToContacts = async (contacts, message, location) => {
   console.log(`[SOS] Network status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
   console.log(`[SOS] Sending to ${phoneNumbers.length} contacts`);
 
+  const failedContacts = [];
+
   // Method 1: Try expo-sms (works both online & offline — sends via native SMS)
   try {
     const smsAvailable = await SMS.isAvailableAsync();
@@ -141,12 +143,23 @@ export const sendSOSToContacts = async (contacts, message, location) => {
       console.log('[SOS] Using expo-sms to send to all contacts at once');
       const { result } = await SMS.sendSMSAsync(phoneNumbers, fullMessage);
       console.log(`[SOS] SMS result: ${result}`);
+
+      // Security (Vuln #21): Track SMS delivery status
+      const success = result === 'sent' || result === 'unknown';
+      if (result === 'cancelled') {
+        Alert.alert(
+          '⚠️ SOS Not Sent',
+          'SMS was cancelled. Your emergency contacts were NOT alerted. Please try again or call emergency services directly.',
+          [{ text: 'OK', style: 'destructive' }]
+        );
+      }
       return {
-        success: result === 'sent' || result === 'unknown', // 'unknown' on Android means SMS app opened
+        success,
         method: 'sms',
         result,
         isOnline,
         contactCount: phoneNumbers.length,
+        failedContacts: result === 'cancelled' ? phoneNumbers : [],
       };
     }
   } catch (e) {
@@ -167,6 +180,7 @@ export const sendSOSToContacts = async (contacts, message, location) => {
       method: 'sms_intent',
       isOnline,
       contactCount: phoneNumbers.length,
+      failedContacts: [],
     };
   } catch (e) {
     console.error('[SOS] SMS intent failed:', e);
@@ -186,7 +200,21 @@ export const sendSOSToContacts = async (contacts, message, location) => {
       await new Promise(r => setTimeout(r, 800));
     } catch (e) {
       console.error(`[SOS] Failed for ${number}:`, e);
+      failedContacts.push(number);
     }
+  }
+
+  // Security (Vuln #21): Alert user about failed SMS deliveries
+  if (failedContacts.length > 0) {
+    const failedNames = contacts
+      .filter(c => failedContacts.includes(c.phone))
+      .map(c => c.name)
+      .join(', ');
+    Alert.alert(
+      '⚠️ Some Alerts Failed',
+      `Could not send SOS to: ${failedNames || failedContacts.join(', ')}.\n\nPlease call them directly or dial emergency services.`,
+      [{ text: 'OK' }]
+    );
   }
 
   return {
@@ -195,6 +223,7 @@ export const sendSOSToContacts = async (contacts, message, location) => {
     sentCount,
     totalContacts: phoneNumbers.length,
     isOnline,
+    failedContacts,
   };
 };
 

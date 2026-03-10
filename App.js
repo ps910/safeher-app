@@ -187,6 +187,10 @@ function AppInner({ modules }) {
       const { default: OfflineLocationService } = await import('./src/services/OfflineLocationService');
       const { SessionsDB, UserDB, DatabaseUtils } = await import('./src/services/Database');
       const { default: CloudSyncService } = await import('./src/services/CloudSyncService');
+      const { default: RootDetectionService } = await import('./src/services/RootDetectionService');
+
+      // Security: Check for rooted/jailbroken device (Vuln #18)
+      await RootDetectionService.warnIfRooted();
 
       // Start session + warm DB cache
       await SessionsDB.start();

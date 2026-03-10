@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "expo-module-scripts": "^5.0.8",
     "sharp": "^0.34.5"
   }

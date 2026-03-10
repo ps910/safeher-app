@@ -34,17 +34,31 @@ const ContactsScreen = ({ navigation }) => {
     tier: 1,
   });
 
+  // ── Security: Input sanitization helpers (Vuln #2) ──
+  const sanitizeText = (text) => text.replace(/[<>{}\\/"'`;]/g, '').substring(0, 50);
+  const sanitizePhone = (text) => text.replace(/[^0-9+\-() ]/g, '').substring(0, 15);
+  const sanitizeRelation = (text) => text.replace(/[<>{}\\/"'`;]/g, '').substring(0, 30);
+
   const handleAddContact = async () => {
-    if (!newContact.name.trim()) {
-      Alert.alert('Error', 'Please enter a name');
+    const sanitizedName = sanitizeText(newContact.name);
+    const sanitizedPhone = sanitizePhone(newContact.phone);
+    const sanitizedRelation = sanitizeRelation(newContact.relation);
+
+    if (!sanitizedName.trim()) {
+      Alert.alert('Error', 'Please enter a valid name (no special characters)');
       return;
     }
-    if (!newContact.phone.trim() || newContact.phone.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
+    if (!sanitizedPhone.trim() || sanitizedPhone.replace(/\D/g, '').length < 10) {
+      Alert.alert('Error', 'Please enter a valid phone number (at least 10 digits)');
       return;
     }
 
-    await addContact(newContact);
+    await addContact({
+      ...newContact,
+      name: sanitizedName.trim(),
+      phone: sanitizedPhone.trim(),
+      relation: sanitizedRelation.trim(),
+    });
     setNewContact({ name: '', phone: '', relation: '', tier: 1 });
     setModalVisible(false);
   };

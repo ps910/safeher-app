@@ -428,6 +428,11 @@ const MagicLinkOTPService = {
    */
   async verifyMagicLink(token) {
     try {
+      // Security (Vuln #13): Validate token format before processing
+      if (!token || typeof token !== 'string' || token.length > 128 || !/^[a-f0-9]+$/i.test(token)) {
+        return { success: false, error: 'INVALID_TOKEN' };
+      }
+
       const linkStr = await SecureStore.getItemAsync(MAGIC_LINK_KEY);
       if (!linkStr) {
         return { success: false, error: 'LINK_EXPIRED' };

@@ -17,5 +17,15 @@ ios/build/
 
 # Misc
 .idea/
+.vscode/
 *.log
 *.hprof
+
+# Keystore files (never commit signing keys)
+*.keystore
+*.jks
+android/keystore.properties
+
+# Environment / secrets
+.env
+.env.*

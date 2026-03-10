@@ -276,6 +276,10 @@ export default function LocationScreen() {
     await Clipboard.setStringAsync(link);
     setCopied(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Security: Auto-clear clipboard after 30s to prevent location data leakage (Vuln #12)
+    setTimeout(async () => {
+      try { await Clipboard.setStringAsync(''); } catch (e) { /* ignore */ }
+    }, 30000);
     setTimeout(() => setCopied(false), 2500);
   };
 

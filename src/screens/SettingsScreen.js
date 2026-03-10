@@ -76,8 +76,12 @@ export default function SettingsScreen() {
   };
 
   const saveMessage = () => {
-    if (tempMessage.trim()) {
-      updateSOSMessage(tempMessage.trim());
+    const sanitized = tempMessage.replace(/[<>{}\\/"'`;]/g, '').trim();
+    if (sanitized && sanitized.length >= 10) {
+      updateSOSMessage(sanitized.substring(0, 300));
+    } else {
+      Alert.alert('Invalid Message', 'SOS message must be at least 10 characters long.');
+      return;
     }
     setEditingMessage(false);
   };

@@ -348,11 +348,14 @@ const FakeCallScreen = ({ navigation }) => {
   };
 
   const addCustomCaller = () => {
-    if (customCaller.name.trim()) {
+    // Security: Sanitize custom caller inputs (Vuln #6)
+    const sanitizedName = customCaller.name.replace(/[<>{}\\/"'`;]/g, '').trim().substring(0, 30);
+    const sanitizedNumber = customCaller.number.replace(/[^0-9+\-() ]/g, '').trim().substring(0, 15);
+    if (sanitizedName) {
       setSelectedCaller({
         id: 'custom',
-        name: customCaller.name.trim(),
-        number: customCaller.number.trim() || '+91 00000 00000',
+        name: sanitizedName,
+        number: sanitizedNumber || '+91 00000 00000',
         emoji: '📱',
         label: 'Mobile',
         photo: customCaller.photo || null,
