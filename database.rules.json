@@ -1,0 +1,26 @@
+{
+  "rules": {
+    "users": {
+      "$deviceId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "admin": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null",
+      "active_sos": {
+        ".read": "auth != null"
+      },
+      "statistics": {
+        ".read": "auth != null"
+      }
+    },
+    "live_tracking": {
+      "$sessionId": {
+        ".read": true,
+        ".write": "auth != null"
+      }
+    }
+  }
+}

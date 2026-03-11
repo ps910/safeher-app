@@ -412,13 +412,20 @@ class SafetyAIServiceClass {
   }
 
   _uint8ToBase64(uint8) {
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < uint8.length; i += chunkSize) {
-      const chunk = uint8.subarray(i, Math.min(i + chunkSize, uint8.length));
-      binary += String.fromCharCode.apply(null, chunk);
+    // React Native compatible base64 encoder (no btoa dependency)
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let result = '';
+    const len = uint8.length;
+    for (let i = 0; i < len; i += 3) {
+      const a = uint8[i];
+      const b = i + 1 < len ? uint8[i + 1] : 0;
+      const c = i + 2 < len ? uint8[i + 2] : 0;
+      result += chars[(a >> 2) & 0x3f];
+      result += chars[((a & 3) << 4) | ((b >> 4) & 0xf)];
+      result += i + 1 < len ? chars[((b & 0xf) << 2) | ((c >> 6) & 3)] : '=';
+      result += i + 2 < len ? chars[c & 0x3f] : '=';
     }
-    return btoa(binary);
+    return result;
   }
 
   // ═══════════════════════════════════════════════════════════════

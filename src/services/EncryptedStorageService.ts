@@ -1,33 +1,34 @@
 /**
- * EncryptedStorageService — Secure data storage wrapper
- * Migrates sensitive data from plain AsyncStorage to encrypted storage.
- * Uses expo-secure-store for secrets + AES-encrypted AsyncStorage for bulk data.
- * 
- * Features:
- *  - Hardware-backed encryption (Keychain on iOS, Keystore on Android)
- *  - Transparent migration from plain AsyncStorage
- *  - AES-256 encryption for large data (contacts, settings)
- *  - Auto-migration on first use
- *  - Secure deletion (panic wipe)
- * 
- * v1.0 — SafeHer App
+ * EncryptedStorageService — TypeScript — Secure data storage wrapper
  */
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// React Native compatible base64 encoder/decoder (no btoa/atob dependency)
+// ── Types ────────────────────────────────────────────────────────
+interface EncryptedPayload {
+  v: number;
+  d: string;
+  h: string;
+}
+
+interface MigrationResult {
+  success: boolean;
+  alreadyMigrated?: boolean;
+  migratedCount?: number;
+  error?: string;
+}
+
+// ── Base64 Encoder/Decoder ───────────────────────────────────────
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-const base64Encode = (str) => {
+const base64Encode = (str: string): string => {
   try {
-    // Try native btoa first
     if (typeof btoa === 'function') {
       return btoa(unescape(encodeURIComponent(str)));
     }
-  } catch (e) {}
-  // Manual base64 encode
-  const bytes = [];
+  } catch {}
+  const bytes: number[] = [];
   for (let i = 0; i < str.length; i++) {
     bytes.push(str.charCodeAt(i) & 0xff);
   }
@@ -44,15 +45,13 @@ const base64Encode = (str) => {
   return result;
 };
 
-const base64Decode = (str) => {
+const base64Decode = (str: string): string => {
   try {
-    // Try native atob first
     if (typeof atob === 'function') {
       return decodeURIComponent(escape(atob(str)));
     }
-  } catch (e) {}
-  // Manual base64 decode
-  const lookup = {};
+  } catch {}
+  const lookup: Record<string, number> = {};
   for (let i = 0; i < BASE64_CHARS.length; i++) lookup[BASE64_CHARS[i]] = i;
   str = str.replace(/=+$/, '');
   let result = '';
@@ -68,10 +67,10 @@ const base64Decode = (str) => {
   return result;
 };
 
+// ── Constants ────────────────────────────────────────────────────
 const MIGRATION_KEY = '@gs_encrypted_migration_v1';
 const ENCRYPTION_KEY_ALIAS = 'gs_data_encryption_key';
 
-// Keys that contain sensitive data and need encryption
 const SENSITIVE_KEYS = [
   '@girl_safety_contacts',
   '@girl_safety_settings',
@@ -83,25 +82,22 @@ const SENSITIVE_KEYS = [
   '@gs_incident_reports',
 ];
 
-// ─── Encryption Helpers ──────────────────────────────────────────
-let _encryptionKey = null;
+// ── Encryption Helpers ───────────────────────────────────────────
+let _encryptionKey: string | null = null;
 
-const getEncryptionKey = async () => {
+const getEncryptionKey = async (): Promise<string | null> => {
   if (_encryptionKey) return _encryptionKey;
 
   try {
-    // Try to load existing key from secure store
     const existing = await SecureStore.getItemAsync(ENCRYPTION_KEY_ALIAS);
     if (existing) {
       _encryptionKey = existing;
       return existing;
     }
 
-    // Generate new 256-bit AES key
     const keyBytes = await Crypto.getRandomBytesAsync(32);
     const key = Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    // Store in hardware-backed secure storage
+
     await SecureStore.setItemAsync(ENCRYPTION_KEY_ALIAS, key, {
       keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     });
@@ -114,23 +110,16 @@ const getEncryptionKey = async () => {
   }
 };
 
-/**
- * Simple XOR-based encryption for when we can't use native crypto.
- * For a production app, consider using a native AES module.
- * The key is stored in hardware-backed secure storage.
- */
-const encrypt = async (plaintext) => {
+const encrypt = async (plaintext: string): Promise<string> => {
   try {
     const key = await getEncryptionKey();
     if (!key) return plaintext;
 
-    // Create HMAC hash for integrity + XOR encrypt
     const hmac = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       key + plaintext
     );
 
-    // XOR encrypt with key hash
     const keyHash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       key
@@ -142,7 +131,6 @@ const encrypt = async (plaintext) => {
       encrypted += String.fromCharCode(charCode);
     }
 
-    // Base64 encode for storage
     const encoded = base64Encode(encrypted);
     return JSON.stringify({ v: 1, d: encoded, h: hmac.substring(0, 16) });
   } catch (e) {
@@ -151,29 +139,24 @@ const encrypt = async (plaintext) => {
   }
 };
 
-const decrypt = async (ciphertext) => {
+const decrypt = async (ciphertext: string): Promise<string> => {
   try {
     const key = await getEncryptionKey();
     if (!key) return ciphertext;
 
-    // Check if data is encrypted (has our wrapper format)
-    let parsed;
+    let parsed: EncryptedPayload;
     try {
       parsed = JSON.parse(ciphertext);
     } catch {
-      // Not encrypted JSON, return as-is (plain data)
       return ciphertext;
     }
 
     if (!parsed.v || !parsed.d) {
-      // Not our encrypted format, return original
       return ciphertext;
     }
 
-    // Decode Base64
     const encrypted = base64Decode(parsed.d);
 
-    // XOR decrypt with key hash
     const keyHash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       key
@@ -185,7 +168,6 @@ const decrypt = async (ciphertext) => {
       decrypted += String.fromCharCode(charCode);
     }
 
-    // Verify integrity
     const hmac = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       key + decrypted
@@ -202,18 +184,12 @@ const decrypt = async (ciphertext) => {
   }
 };
 
-// ─── Public API ──────────────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────────
 const EncryptedStorageService = {
-  /**
-   * Store a value securely.
-   * Small values (<2KB) go to SecureStore (hardware-backed).
-   * Larger values are encrypted and stored in AsyncStorage.
-   */
-  async setItem(key, value) {
+  async setItem(key: string, value: string): Promise<boolean> {
     try {
       const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
 
-      // Small sensitive values → SecureStore (hardware-backed)
       if (stringValue.length < 2048) {
         try {
           await SecureStore.setItemAsync(key, stringValue, {
@@ -221,11 +197,10 @@ const EncryptedStorageService = {
           });
           return true;
         } catch {
-          // SecureStore has a size limit, fall through to encrypted AsyncStorage
+          // Fall through to encrypted AsyncStorage
         }
       }
 
-      // Larger values → encrypted AsyncStorage
       const encrypted = await encrypt(stringValue);
       await AsyncStorage.setItem(`enc_${key}`, encrypted);
       return true;
@@ -235,26 +210,18 @@ const EncryptedStorageService = {
     }
   },
 
-  /**
-   * Retrieve a securely stored value.
-   */
-  async getItem(key) {
+  async getItem(key: string): Promise<string | null> {
     try {
-      // Try SecureStore first
       try {
         const secure = await SecureStore.getItemAsync(key);
         if (secure !== null) return secure;
-      } catch {
-        // Not in SecureStore, try encrypted AsyncStorage
-      }
+      } catch {}
 
-      // Try encrypted AsyncStorage
       const encrypted = await AsyncStorage.getItem(`enc_${key}`);
       if (encrypted !== null) {
         return await decrypt(encrypted);
       }
 
-      // Fall back to plain AsyncStorage (pre-migration data)
       return await AsyncStorage.getItem(key);
     } catch (e) {
       console.error('[EncStorage] getItem error:', e);
@@ -262,10 +229,7 @@ const EncryptedStorageService = {
     }
   },
 
-  /**
-   * Remove a securely stored value.
-   */
-  async removeItem(key) {
+  async removeItem(key: string): Promise<boolean> {
     try {
       try { await SecureStore.deleteItemAsync(key); } catch {}
       try { await AsyncStorage.removeItem(`enc_${key}`); } catch {}
@@ -276,11 +240,7 @@ const EncryptedStorageService = {
     }
   },
 
-  /**
-   * Migrate existing plain AsyncStorage data to encrypted storage.
-   * Call this once at app startup.
-   */
-  async migrateToEncrypted() {
+  async migrateToEncrypted(): Promise<MigrationResult> {
     try {
       const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
       if (migrated === 'done') {
@@ -295,9 +255,7 @@ const EncryptedStorageService = {
         try {
           const plainValue = await AsyncStorage.getItem(key);
           if (plainValue !== null) {
-            // Encrypt and store
             await this.setItem(key, plainValue);
-            // Remove plain version
             await AsyncStorage.removeItem(key);
             migratedCount++;
             console.log(`[EncStorage] Migrated: ${key}`);
@@ -311,29 +269,23 @@ const EncryptedStorageService = {
       console.log(`[EncStorage] Migration complete: ${migratedCount} keys`);
 
       return { success: true, migratedCount };
-    } catch (e) {
+    } catch (e: any) {
       console.error('[EncStorage] Migration error:', e);
       return { success: false, error: e.message };
     }
   },
 
-  /**
-   * Securely wipe all encrypted data (panic wipe).
-   */
-  async secureWipe() {
+  async secureWipe(): Promise<boolean> {
     try {
-      // Clear all sensitive keys from everywhere
       for (const key of SENSITIVE_KEYS) {
         try { await SecureStore.deleteItemAsync(key); } catch {}
         try { await AsyncStorage.removeItem(key); } catch {}
         try { await AsyncStorage.removeItem(`enc_${key}`); } catch {}
       }
 
-      // Clear encryption key
       try { await SecureStore.deleteItemAsync(ENCRYPTION_KEY_ALIAS); } catch {}
       _encryptionKey = null;
 
-      // Clear migration marker
       await AsyncStorage.removeItem(MIGRATION_KEY);
 
       console.log('[EncStorage] Secure wipe complete');
@@ -344,10 +296,7 @@ const EncryptedStorageService = {
     }
   },
 
-  /**
-   * Get JSON-parsed item.
-   */
-  async getJSON(key) {
+  async getJSON<T = any>(key: string): Promise<T | null> {
     try {
       const val = await this.getItem(key);
       return val ? JSON.parse(val) : null;
@@ -356,10 +305,7 @@ const EncryptedStorageService = {
     }
   },
 
-  /**
-   * Store JSON item.
-   */
-  async setJSON(key, value) {
+  async setJSON(key: string, value: any): Promise<boolean> {
     return this.setItem(key, JSON.stringify(value));
   },
 };

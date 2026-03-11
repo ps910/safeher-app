@@ -1,19 +1,21 @@
 /**
- * AuthContext v7.0 — Firebase + Local Auth Provider
+ * AuthContext v7.0 — Firebase + Local Auth Provider (TypeScript)
  * ══════════════════════════════════════════════════════════════════
  *
  * Bridges Firebase Authentication with local app state.
  * All existing screens continue to work (backward-compatible).
  * New AuthScreen.js uses Firebase directly and calls authenticate().
  */
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut as firebaseSignOut, User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../config/firebase';
 
-const AuthContext = createContext();
+import type { AuthContextValue, UserProfile, AuthMethod } from '../types';
 
-export const useAuth = () => {
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export const useAuth = (): AuthContextValue => {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
@@ -28,9 +30,9 @@ const KEYS = {
   AUTH_METHOD:      '@gs_auth_method',
   SOCIAL_DATA:      '@gs_social_data',
   PROFILE_COMPLETE: '@gs_profile_complete',
-};
+} as const;
 
-const DEFAULT_PROFILE = {
+const DEFAULT_PROFILE: UserProfile = {
   fullName: '',       phone: '',         email: '',
   dateOfBirth: '',    gender: '',        profilePicUri: null,
   bloodGroup: '',     allergies: '',     medicalConditions: '',
@@ -38,35 +40,38 @@ const DEFAULT_PROFILE = {
   collegeAddress: '', vehicleDetails: '',
 };
 
-export const AuthProvider = ({ children }) => {
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // ── Core Auth State ──────────────────────────────────────────
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading,       setIsLoading]       = useState(true);
-  const [firebaseUser,    setFirebaseUser]    = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isLoading,       setIsLoading]       = useState<boolean>(true);
+  const [firebaseUser,    setFirebaseUser]    = useState<FirebaseUser | null>(null);
 
   // ── Local App State ──────────────────────────────────────────
-  const [isOnboarded,      setIsOnboarded]      = useState(false);
-  const [userProfile,      setUserProfile]      = useState(DEFAULT_PROFILE);
-  const [pin,              setPin]              = useState(null);
-  const [duressPin,        setDuressPin]        = useState(null);
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
-  const [isDuressMode,     setIsDuressMode]     = useState(false);
-  const [authMethod,       setAuthMethod]       = useState(null);
-  const [socialData,       setSocialData]       = useState(null);
-  const [isProfileComplete,setIsProfileComplete]= useState(false);
+  const [isOnboarded,       setIsOnboarded]       = useState<boolean>(false);
+  const [userProfile,       setUserProfile]       = useState<UserProfile>(DEFAULT_PROFILE);
+  const [pin,               setPin]               = useState<string | null>(null);
+  const [duressPin,         setDuressPin]         = useState<string | null>(null);
+  const [biometricEnabled,  setBiometricEnabled]  = useState<boolean>(false);
+  const [isDuressMode,      setIsDuressMode]      = useState<boolean>(false);
+  const [authMethod,        setAuthMethod]        = useState<AuthMethod | null>(null);
+  const [socialData,        setSocialData]        = useState<Record<string, any> | null>(null);
+  const [isProfileComplete, setIsProfileComplete] = useState<boolean>(false);
 
   // ── Stubs (screens reference these — non-fatal) ──────────────
-  const [passkeyAvailable,  ] = useState(false);
-  const [passkeyRegistered, ] = useState(false);
-  const [mfaEnabled,        ] = useState(false);
-  const [mfaMethods,        ] = useState([]);
-  const [hasPasswordSet,    ] = useState(false);
-  const [pendingMFA,        ] = useState(null);
-  const [jwtPayload,        ] = useState(null);
+  const [passkeyAvailable]  = useState<boolean>(false);
+  const [passkeyRegistered] = useState<boolean>(false);
+  const [mfaEnabled]        = useState<boolean>(false);
+  const [mfaMethods]        = useState<string[]>([]);
+  const [hasPasswordSet]    = useState<boolean>(false);
+  const [pendingMFA]        = useState<any>(null);
+  const [jwtPayload]        = useState<any>(null);
 
   // ── Bootstrap ────────────────────────────────────────────────
   useEffect(() => {
-    // Listen to Firebase auth state
     const unsubFirebase = onAuthStateChanged(auth, (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
@@ -79,16 +84,14 @@ export const AuthProvider = ({ children }) => {
           }));
         }
       }
-      // Don't force-false isAuthenticated — PIN flow doesn't use Firebase
     });
 
-    // Load local persisted state
     loadLocal().finally(() => setIsLoading(false));
 
     return unsubFirebase;
   }, []);
 
-  const loadLocal = async () => {
+  const loadLocal = async (): Promise<void> => {
     try {
       const [
         pinData, duressData, profileData, onboardedData,
@@ -106,12 +109,17 @@ export const AuthProvider = ({ children }) => {
       if (pinData)            setPin(pinData);
       if (duressData)         setDuressPin(duressData);
       if (profileData) {
-        const saved = JSON.parse(profileData);
-        setUserProfile(prev => ({ ...DEFAULT_PROFILE, ...saved, email: prev.email || saved.email || '', fullName: prev.fullName || saved.fullName || '' }));
+        const saved = JSON.parse(profileData) as Partial<UserProfile>;
+        setUserProfile(prev => ({
+          ...DEFAULT_PROFILE,
+          ...saved,
+          email: prev.email || saved.email || '',
+          fullName: prev.fullName || saved.fullName || '',
+        }));
       }
       if (onboardedData)      setIsOnboarded(JSON.parse(onboardedData));
       if (bioData)            setBiometricEnabled(JSON.parse(bioData));
-      if (authMethodData)     setAuthMethod(authMethodData);
+      if (authMethodData)     setAuthMethod(authMethodData as AuthMethod);
       if (socialDataStr)      setSocialData(JSON.parse(socialDataStr));
       if (profileCompleteStr) setIsProfileComplete(JSON.parse(profileCompleteStr));
     } catch (e) {
@@ -119,62 +127,55 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ── Authentication ───────────────────────────────────────────
-
-  /** Called by AuthScreen after any successful sign-in */
-  const authenticate = async (method = 'unknown', extra = {}, isDuress = false) => {
+  const authenticate = async (
+    method: string = 'unknown',
+    extra: Record<string, any> = {},
+    isDuress: boolean = false
+  ): Promise<void> => {
     setIsAuthenticated(true);
     setIsDuressMode(!!isDuress);
-    setAuthMethod(method);
+    setAuthMethod(method as AuthMethod);
     try {
       await AsyncStorage.setItem(KEYS.AUTH_METHOD, method);
       if (extra?.email) _patchProfile({ email: extra.email });
       if (extra?.phone) _patchProfile({ phone: extra.phone });
       if (extra?.name)  _patchProfile({ fullName: extra.name });
-    } catch (_) {}
+    } catch {}
   };
 
-  /** Lock — sign out from Firebase and clear local auth state */
-  const lock = async () => {
+  const lock = async (): Promise<void> => {
     setIsAuthenticated(false);
     setIsDuressMode(false);
-    try { await firebaseSignOut(auth); } catch (_) {}
+    try { await firebaseSignOut(auth); } catch {}
   };
 
-  const enterDuressMode = async () => {
+  const enterDuressMode = async (): Promise<void> => {
     setIsDuressMode(true);
     setIsAuthenticated(true);
   };
 
-  // ── PIN ──────────────────────────────────────────────────────
-
-  const setupPin = async (newPin) => {
+  const setupPin = async (newPin: string): Promise<void> => {
     await AsyncStorage.setItem(KEYS.PIN, newPin);
     setPin(newPin);
   };
 
-  const setupDuressPin = async (newPin) => {
+  const setupDuressPin = async (newPin: string): Promise<void> => {
     await AsyncStorage.setItem(KEYS.DURESS_PIN, newPin);
     setDuressPin(newPin);
   };
 
-  /** Returns 'normal' | 'duress' | false */
-  const verifyPin = (entered) => {
+  const verifyPin = (entered: string): 'normal' | 'duress' | false => {
     if (entered === pin) return 'normal';
     if (duressPin && entered === duressPin) return 'duress';
     return false;
   };
 
-  // ── Biometric ────────────────────────────────────────────────
-
-  const toggleBiometric = async (val) => {
+  const toggleBiometric = async (val: boolean): Promise<void> => {
     setBiometricEnabled(val);
     await AsyncStorage.setItem(KEYS.BIOMETRIC, JSON.stringify(val));
   };
 
-  // ── Profile ──────────────────────────────────────────────────
-
-  const _patchProfile = (updates) => {
+  const _patchProfile = (updates: Partial<UserProfile>): void => {
     setUserProfile(prev => {
       const next = { ...prev, ...updates };
       AsyncStorage.setItem(KEYS.PROFILE, JSON.stringify(next)).catch(() => {});
@@ -182,38 +183,40 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
-  const updateProfile = async (updates) => { _patchProfile(updates); };
+  const updateProfile = async (updates: Partial<UserProfile>): Promise<void> => {
+    _patchProfile(updates);
+  };
 
-  const markProfileComplete = async () => {
+  const markProfileComplete = async (): Promise<void> => {
     setIsProfileComplete(true);
     await AsyncStorage.setItem(KEYS.PROFILE_COMPLETE, JSON.stringify(true));
   };
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = async (): Promise<void> => {
     setIsOnboarded(true);
     await AsyncStorage.setItem(KEYS.ONBOARDED, JSON.stringify(true));
   };
 
-  const prefillFromSocial = () => {
+  const prefillFromSocial = (): Partial<UserProfile> => {
     if (!socialData) return {};
-    const fill = {};
-    if (socialData.name)       fill.fullName    = socialData.name;
-    if (socialData.email)      fill.email       = socialData.email;
-    if (socialData.phone)      fill.phone       = socialData.phone;
+    const fill: Partial<UserProfile> = {};
+    if (socialData.name)       fill.fullName     = socialData.name;
+    if (socialData.email)      fill.email        = socialData.email;
+    if (socialData.phone)      fill.phone        = socialData.phone;
     if (socialData.picture)    fill.profilePicUri = socialData.picture;
     if (socialData.given_name) fill.fullName = `${socialData.given_name} ${socialData.family_name || ''}`.trim();
     return fill;
   };
 
-  const socialLogin = async (method, data) => {
-    setAuthMethod(method);
+  const socialLogin = async (method: string, data: Record<string, any>): Promise<void> => {
+    setAuthMethod(method as AuthMethod);
     setSocialData(data);
     try {
       await AsyncStorage.setItem(KEYS.AUTH_METHOD, method);
       await AsyncStorage.setItem(KEYS.SOCIAL_DATA, JSON.stringify(data));
       if (data?.email) _patchProfile({ email: data.email });
       if (data?.name)  _patchProfile({ fullName: data.name });
-    } catch (_) {}
+    } catch {}
   };
 
   // ── Backward-compat stubs ────────────────────────────────────
@@ -222,7 +225,10 @@ export const AuthProvider = ({ children }) => {
   const getAuthHeader           = async () => ({ Authorization: 'Bearer stub' });
   const registerPasskey         = async () => ({ credentialId: 'stub' });
   const authenticateWithPasskey = async () => { await authenticate('passkey'); return {}; };
-  const authenticateWithOAuth   = async (provider, data = {}) => { await authenticate(provider, data); return { profile: data }; };
+  const authenticateWithOAuth   = async (provider: string, data: Record<string, any> = {}) => {
+    await authenticate(provider, data);
+    return { profile: data };
+  };
   const handleOAuthCallback     = async () => {};
   const sendPhoneOTP            = async () => ({ sessionId: 'stub', code: '000000' });
   const sendEmailOTP            = async () => ({ sessionId: 'stub', code: '000000' });
@@ -234,13 +240,15 @@ export const AuthProvider = ({ children }) => {
   const verifyMFAAndAuth        = async () => ({ success: true });
   const enableMFA               = async () => ({ success: true });
   const disableMFA              = async () => ({ success: true });
-  const validatePassword        = (p) => ({ valid: p.length >= 6, score: Math.min(4, Math.floor(p.length / 3)) });
+  const validatePassword        = (p: string) => ({
+    valid: p.length >= 6,
+    score: Math.min(4, Math.floor(p.length / 3)),
+  });
   const changePassword          = async () => ({ success: true });
 
   const hasDuressPin = !!duressPin;
 
-  const value = {
-    // State
+  const value: AuthContextValue = {
     isAuthenticated, isLoading, isOnboarded, userProfile,
     firebaseUser, pin, duressPin, hasDuressPin,
     biometricEnabled, isDuressMode, authMethod, socialData,
@@ -248,14 +256,12 @@ export const AuthProvider = ({ children }) => {
     passkeyAvailable, passkeyRegistered,
     mfaEnabled, mfaMethods, hasPasswordSet, pendingMFA,
 
-    // Core
     authenticate, lock, enterDuressMode, setIsDuressMode,
     setupPin, setupDuressPin, verifyPin,
     toggleBiometric,
     updateProfile, markProfileComplete, completeOnboarding,
     prefillFromSocial, socialLogin,
 
-    // Stubs / advanced
     issueJWTTokens, getAccessToken, getAuthHeader,
     registerPasskey, authenticateWithPasskey,
     authenticateWithOAuth, handleOAuthCallback,
@@ -270,4 +276,3 @@ export const AuthProvider = ({ children }) => {
 };
 
 export default AuthContext;
-

@@ -1,15 +1,112 @@
 /**
  * App Theme - Colors, Fonts & Styling Constants
  * Girl Safety App — Modern, clean, empowering design system
- * 
+ *
  * v2.0: Dark mode support via useColorScheme()
+ * TypeScript — type-safe theme access prevents runtime typo bugs
  */
 import { useColorScheme } from 'react-native';
 import { useMemo } from 'react';
 
+// ── Types ────────────────────────────────────────────────────────
+interface ColorPalette {
+  primary: string;
+  primaryDark: string;
+  primaryLight: string;
+  secondary: string;
+  secondaryDark: string;
+  secondaryLight: string;
+  danger: string;
+  dangerLight: string;
+  success: string;
+  successDark: string;
+  warning: string;
+  warningDark: string;
+  info: string;
+  white: string;
+  surface: string;
+  background: string;
+  card: string;
+  text: string;
+  textSecondary: string;
+  textLight: string;
+  textMuted?: string;
+  border: string;
+  shadow: string;
+  overlay: string;
+  gradientPrimary: string[];
+  gradientSOS: string[];
+  gradientPurple: string[];
+  gradientSafe: string[];
+  physical: string;
+  digital: string;
+  dating: string;
+  home: string;
+  workplace: string;
+  emergency: string;
+  camera: string;
+  // Aliases
+  grey?: string;
+  darkGrey?: string;
+  lightGrey?: string;
+  black?: string;
+  sosRed?: string;
+  safeGreen?: string;
+  cardGradientStart?: string;
+  cardGradientEnd?: string;
+}
+
+interface FontConfig {
+  bold: string;
+  semiBold: string;
+  medium: string;
+  regular: string;
+  light: string;
+}
+
+interface SizeConfig {
+  h1: number;
+  h2: number;
+  h3: number;
+  h4: number;
+  body: number;
+  small: number;
+  tiny: number;
+  base: number;
+  sm: number;
+  xs: number;
+  lg: number;
+  xl: number;
+  xxl: number;
+  xxxl: number;
+  md: number;
+  radiusSm: number;
+  radiusMd: number;
+  radiusLg: number;
+  radiusXl: number;
+  radiusFull: number;
+  iconSm: number;
+  iconMd: number;
+  iconLg: number;
+  iconXl: number;
+}
+
+interface ShadowDef {
+  shadowColor: string;
+  shadowOffset: { width: number; height: number };
+  shadowOpacity: number;
+  shadowRadius: number;
+  elevation: number;
+}
+
+interface ShadowConfig {
+  small: ShadowDef;
+  medium: ShadowDef;
+  large: ShadowDef;
+}
+
 // ─── Light Mode Colors ───────────────────────────────────────────
-export const LIGHT_COLORS = {
-  // Primary palette - empowering pink/magenta
+export const LIGHT_COLORS: ColorPalette = {
   primary: '#E91E63',
   primaryDark: '#C2185B',
   primaryLight: '#F8BBD0',
@@ -17,7 +114,6 @@ export const LIGHT_COLORS = {
   secondaryDark: '#651FFF',
   secondaryLight: '#B388FF',
 
-  // Status colors
   danger: '#FF1744',
   dangerLight: '#FF8A80',
   success: '#00E676',
@@ -26,7 +122,6 @@ export const LIGHT_COLORS = {
   warningDark: '#FFC400',
   info: '#2196F3',
 
-  // Neutrals
   white: '#FFFFFF',
   surface: '#FFFFFF',
   background: '#FEF0F5',
@@ -38,13 +133,11 @@ export const LIGHT_COLORS = {
   shadow: '#00000020',
   overlay: 'rgba(0,0,0,0.5)',
 
-  // Gradients
   gradientPrimary: ['#E91E63', '#AD1457'],
   gradientSOS: ['#FF1744', '#D50000'],
   gradientPurple: ['#7C4DFF', '#4A148C'],
   gradientSafe: ['#00E676', '#00C853'],
 
-  // Category colors
   physical: '#1565C0',
   digital: '#7B1FA2',
   dating: '#C62828',
@@ -55,7 +148,7 @@ export const LIGHT_COLORS = {
 };
 
 // ─── Dark Mode Colors ────────────────────────────────────────────
-export const DARK_COLORS = {
+export const DARK_COLORS: ColorPalette = {
   primary: '#F06292',
   primaryDark: '#E91E63',
   primaryLight: '#880E4F',
@@ -97,15 +190,14 @@ export const DARK_COLORS = {
 };
 
 // ─── Default export (light) for backwards compatibility ──────────
-export const COLORS = {
+export const COLORS: ColorPalette & { grey: string; darkGrey: string; lightGrey: string } = {
   ...LIGHT_COLORS,
-  // Aliases for screens that use these names
   grey:       '#9E9EB8',
   darkGrey:   '#555770',
   lightGrey:  '#E8E8F0',
 };
 
-export const FONTS = {
+export const FONTS: FontConfig = {
   bold: 'System',
   semiBold: 'System',
   medium: 'System',
@@ -113,8 +205,7 @@ export const FONTS = {
   light: 'System',
 };
 
-export const SIZES = {
-  // Font sizes
+export const SIZES: SizeConfig = {
   h1: 30,
   h2: 24,
   h3: 20,
@@ -123,7 +214,6 @@ export const SIZES = {
   small: 12,
   tiny: 10,
 
-  // Aliases used by auth screens
   base:  14,
   sm:    12,
   xs:    10,
@@ -132,24 +222,21 @@ export const SIZES = {
   xxl:   28,
   xxxl:  26,
 
-  // Spacing (also aliased as sm/md/lg above)
   md: 16,
 
-  // Border radius
   radiusSm: 8,
   radiusMd: 12,
   radiusLg: 20,
   radiusXl: 30,
   radiusFull: 999,
 
-  // Icon sizes
   iconSm: 20,
   iconMd: 24,
   iconLg: 32,
   iconXl: 48,
 };
 
-export const SHADOWS = {
+export const SHADOWS: ShadowConfig = {
   small: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -174,11 +261,13 @@ export const SHADOWS = {
 };
 
 // ─── useTheme Hook — Dark Mode Support ───────────────────────────
-/**
- * Returns theme-aware colors based on system appearance.
- * Usage: const { colors, isDark } = useTheme();
- */
-export const useTheme = () => {
+interface ThemeReturn {
+  colors: ColorPalette;
+  isDark: boolean;
+  colorScheme: 'light' | 'dark' | null | undefined;
+}
+
+export const useTheme = (): ThemeReturn => {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 

@@ -1,69 +1,96 @@
 /**
- * NotificationService — Push Notifications + SOS Delivery Confirmation
- * Uses expo-notifications + Firebase Cloud Messaging (FCM) for reliable
- * SOS alert delivery with read receipts.
- * 
- * Features:
- *  - FCM push notifications to emergency contacts
- *  - Local notifications for SOS triggers, journey alerts, check-in reminders
- *  - Persistent SOS notification with quick-tap actions
- *  - Delivery confirmation via Firebase RTDB
- *  - Volume button SOS trigger via notification action
- * 
- * v1.0 — SafeHer App
+ * NotificationService — TypeScript — Push Notifications + SOS Delivery
  */
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// ── Types ────────────────────────────────────────────────────────
+interface InitOptions {
+  onSOSTrigger?: (() => void) | null;
+  onNotification?: ((notification: Notifications.Notification) => void) | null;
+}
+
+interface InitResult {
+  success: boolean;
+  pushToken?: string | null;
+  error?: string;
+}
+
+interface PushResult {
+  success: boolean;
+  sent?: number;
+  total?: number;
+  receipts?: DeliveryReceipt[];
+  reason?: string;
+  error?: string;
+}
+
+interface DeliveryReceipt {
+  contact: string;
+  status: string;
+  id: string;
+  timestamp: number;
+}
+
+interface EmergencyContact {
+  id: string;
+  name: string;
+  phone: string;
+  [key: string]: any;
+}
+
+interface LocationInput {
+  coords?: {
+    latitude: number;
+    longitude: number;
+  };
+}
+
+// ── Constants ────────────────────────────────────────────────────
 const FCM_TOKENS_KEY = '@gs_fcm_tokens';
 const NOTIFICATION_CHANNEL_SOS = 'sos-alerts';
 const NOTIFICATION_CHANNEL_SAFETY = 'safety-alerts';
 
-// ─── Initialize notification handler ─────────────────────────────
+// ── Notification Handler ─────────────────────────────────────────
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = notification.request.content.data || {};
-    
-    // Always show SOS notifications with max priority
+
     if (data.type === 'sos') {
       return {
         shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         priority: Notifications.AndroidNotificationPriority.MAX,
       };
     }
-    
+
     return {
       shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
     };
   },
 });
 
-// ─── State ───────────────────────────────────────────────────────
-let _notificationListener = null;
-let _responseListener = null;
-let _onSOSTrigger = null;
-let _pushToken = null;
+// ── State ────────────────────────────────────────────────────────
+let _notificationListener: Notifications.Subscription | null = null;
+let _responseListener: Notifications.Subscription | null = null;
+let _onSOSTrigger: (() => void) | null = null;
+let _pushToken: string | null = null;
 
 const NotificationService = {
-  /**
-   * Initialize the notification service.
-   * Must be called once at app startup.
-   * @param {Object} options
-   * @param {Function} options.onSOSTrigger - Called when SOS notification action is tapped
-   * @param {Function} options.onNotification - Called on incoming notification
-   */
-  async initialize(options = {}) {
+  async initialize(options: InitOptions = {}): Promise<InitResult> {
     const { onSOSTrigger = null, onNotification = null } = options;
     _onSOSTrigger = onSOSTrigger;
 
     try {
-      // Create Android notification channels
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_SOS, {
           name: 'SOS Emergency Alerts',
@@ -84,7 +111,6 @@ const NotificationService = {
         });
       }
 
-      // Request permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
       if (existingStatus !== 'granted') {
@@ -97,32 +123,25 @@ const NotificationService = {
         return { success: false, error: 'permission_denied' };
       }
 
-      // Get push token for FCM
       try {
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId || (Constants as any).easConfig?.projectId;
         if (projectId) {
           const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
           _pushToken = tokenData.data;
           console.log('[Notifications] Push token:', _pushToken);
-        } else {
-          console.log('[Notifications] No project ID available for push token');
         }
-      } catch (e) {
+      } catch (e: any) {
         console.log('[Notifications] Push token error (expected in dev):', e.message);
       }
 
-      // Listen for incoming notifications
       _notificationListener = Notifications.addNotificationReceivedListener((notification) => {
         console.log('[Notifications] Received:', notification.request.content.title);
         if (onNotification) onNotification(notification);
       });
 
-      // Listen for notification taps
       _responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
         const data = response.notification.request.content.data || {};
         const actionId = response.actionIdentifier;
-
-        console.log('[Notifications] Response:', actionId, data);
 
         if (data.type === 'sos_trigger' || actionId === 'SOS_ACTIVATE') {
           if (_onSOSTrigger) _onSOSTrigger();
@@ -131,17 +150,13 @@ const NotificationService = {
 
       console.log('[Notifications] Initialized successfully');
       return { success: true, pushToken: _pushToken };
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Notifications] Init error:', e);
       return { success: false, error: e.message };
     }
   },
 
-  /**
-   * Show persistent SOS notification with quick-tap action button.
-   * This stays in the notification tray for one-tap SOS activation.
-   */
-  async showPersistentSOSNotification() {
+  async showPersistentSOSNotification(): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -152,34 +167,25 @@ const NotificationService = {
           autoDismiss: false,
           ...(Platform.OS === 'android' && {
             channelId: NOTIFICATION_CHANNEL_SOS,
-            priority: 'max',
+            priority: 'max' as any,
             color: '#E91E63',
           }),
         },
-        trigger: null, // Show immediately
+        trigger: null,
         identifier: 'persistent-sos',
       });
-      console.log('[Notifications] Persistent SOS notification shown');
     } catch (e) {
       console.error('[Notifications] Persistent notification error:', e);
     }
   },
 
-  /**
-   * Remove the persistent SOS notification.
-   */
-  async hidePersistentSOSNotification() {
+  async hidePersistentSOSNotification(): Promise<void> {
     try {
       await Notifications.dismissNotificationAsync('persistent-sos');
-    } catch (e) {
-      // May not exist, ignore
-    }
+    } catch {}
   },
 
-  /**
-   * Send SOS alert notification to self (triggers sound + vibration).
-   */
-  async sendSOSActiveNotification(location) {
+  async sendSOSActiveNotification(location?: LocationInput): Promise<void> {
     const locationText = location?.coords
       ? `📍 ${location.coords.latitude.toFixed(6)}, ${location.coords.longitude.toFixed(6)}`
       : 'Location unavailable';
@@ -193,7 +199,7 @@ const NotificationService = {
           sound: 'default',
           ...(Platform.OS === 'android' && {
             channelId: NOTIFICATION_CHANNEL_SOS,
-            priority: 'max',
+            priority: 'max' as any,
             color: '#FF1744',
           }),
         },
@@ -205,23 +211,21 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Send SOS push notification to emergency contacts via Expo Push API.
-   * Contacts need to have registered their push tokens.
-   * Falls back to local notification if push fails.
-   */
-  async sendSOSPushToContacts(contacts, message, location) {
+  async sendSOSPushToContacts(
+    contacts: EmergencyContact[],
+    message: string,
+    location?: LocationInput
+  ): Promise<PushResult> {
     try {
-      // Load stored FCM/push tokens for contacts
       const storedTokens = await AsyncStorage.getItem(FCM_TOKENS_KEY);
-      const tokenMap = storedTokens ? JSON.parse(storedTokens) : {};
+      const tokenMap: Record<string, string> = storedTokens ? JSON.parse(storedTokens) : {};
 
       const locationText = location?.coords
         ? `https://maps.google.com/?q=${location.coords.latitude},${location.coords.longitude}`
         : '';
 
-      const pushMessages = [];
-      
+      const pushMessages: Record<string, any>[] = [];
+
       for (const contact of contacts) {
         const token = tokenMap[contact.phone] || tokenMap[contact.id];
         if (token) {
@@ -245,7 +249,6 @@ const NotificationService = {
       }
 
       if (pushMessages.length > 0) {
-        // Send via Expo Push API
         const response = await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST',
           headers: {
@@ -256,40 +259,26 @@ const NotificationService = {
         });
 
         const result = await response.json();
-        console.log('[Notifications] Push sent:', result);
-
-        // Store delivery receipts
-        const receipts = result.data?.map((r, i) => ({
+        const receipts: DeliveryReceipt[] = result.data?.map((r: any, i: number) => ({
           contact: contacts[i]?.name,
           status: r.status,
           id: r.id,
           timestamp: Date.now(),
         })) || [];
 
-        await AsyncStorage.setItem(
-          '@gs_sos_delivery_receipts',
-          JSON.stringify(receipts)
-        );
+        await AsyncStorage.setItem('@gs_sos_delivery_receipts', JSON.stringify(receipts));
 
-        return {
-          success: true,
-          sent: pushMessages.length,
-          total: contacts.length,
-          receipts,
-        };
+        return { success: true, sent: pushMessages.length, total: contacts.length, receipts };
       }
 
       return { success: false, sent: 0, total: contacts.length, reason: 'no_tokens' };
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Notifications] Push send error:', e);
       return { success: false, error: e.message };
     }
   },
 
-  /**
-   * Show check-in reminder notification.
-   */
-  async showCheckInReminder(minutesSinceLastCheckIn) {
+  async showCheckInReminder(minutesSinceLastCheckIn: number): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -299,7 +288,7 @@ const NotificationService = {
           sound: 'default',
           ...(Platform.OS === 'android' && {
             channelId: NOTIFICATION_CHANNEL_SAFETY,
-            priority: 'high',
+            priority: 'high' as any,
             color: '#FF6D00',
           }),
         },
@@ -311,10 +300,7 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Show journey overdue notification.
-   */
-  async showJourneyOverdueNotification(destination) {
+  async showJourneyOverdueNotification(destination: string): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -324,7 +310,7 @@ const NotificationService = {
           sound: 'default',
           ...(Platform.OS === 'android' && {
             channelId: NOTIFICATION_CHANNEL_SOS,
-            priority: 'max',
+            priority: 'max' as any,
             color: '#FF6D00',
           }),
         },
@@ -336,13 +322,10 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Register a contact's push token (for receiving SOS alerts).
-   */
-  async registerContactToken(contactId, pushToken) {
+  async registerContactToken(contactId: string, pushToken: string): Promise<boolean> {
     try {
       const stored = await AsyncStorage.getItem(FCM_TOKENS_KEY);
-      const tokenMap = stored ? JSON.parse(stored) : {};
+      const tokenMap: Record<string, string> = stored ? JSON.parse(stored) : {};
       tokenMap[contactId] = pushToken;
       await AsyncStorage.setItem(FCM_TOKENS_KEY, JSON.stringify(tokenMap));
       return true;
@@ -351,10 +334,7 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Get delivery receipts for the last SOS.
-   */
-  async getDeliveryReceipts() {
+  async getDeliveryReceipts(): Promise<DeliveryReceipt[]> {
     try {
       const stored = await AsyncStorage.getItem('@gs_sos_delivery_receipts');
       return stored ? JSON.parse(stored) : [];
@@ -363,17 +343,16 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Get this device's push token.
-   */
-  getPushToken() {
+  getPushToken(): string | null {
     return _pushToken;
   },
 
-  /**
-   * Schedule a delayed notification.
-   */
-  async scheduleNotification(title, body, data = {}, delaySeconds = 0) {
+  async scheduleNotification(
+    title: string,
+    body: string,
+    data: Record<string, any> = {},
+    delaySeconds = 0
+  ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -385,17 +364,14 @@ const NotificationService = {
             channelId: NOTIFICATION_CHANNEL_SAFETY,
           }),
         },
-        trigger: delaySeconds > 0 ? { seconds: delaySeconds } : null,
+        trigger: delaySeconds > 0 ? { seconds: delaySeconds } as any : null,
       });
     } catch (e) {
       console.error('[Notifications] Schedule error:', e);
     }
   },
 
-  /**
-   * Cancel all scheduled notifications.
-   */
-  async cancelAll() {
+  async cancelAll(): Promise<void> {
     try {
       await Notifications.cancelAllScheduledNotificationsAsync();
     } catch (e) {
@@ -403,16 +379,13 @@ const NotificationService = {
     }
   },
 
-  /**
-   * Cleanup listeners — call on app unmount.
-   */
-  cleanup() {
+  cleanup(): void {
     if (_notificationListener) {
-      Notifications.removeNotificationSubscription(_notificationListener);
+      _notificationListener.remove();
       _notificationListener = null;
     }
     if (_responseListener) {
-      Notifications.removeNotificationSubscription(_responseListener);
+      _responseListener.remove();
       _responseListener = null;
     }
   },
