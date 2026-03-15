@@ -29,3 +29,7 @@ android/keystore.properties
 # Environment / secrets
 .env
 .env.*
+
+# Firebase config (contains API keys)
+android/app/google-services.json
+ios/GoogleService-Info.plist

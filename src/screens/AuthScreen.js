@@ -11,8 +11,6 @@
  *   'home'          → main landing with all sign-in options
  *   'register'      → create account
  *   'password'      → email + password login
- *   'magic'         → magic link email entry
- *   'magic_sent'    → check inbox screen
  *   'phone'         → phone number + country code
  *   'otp'           → 6-digit OTP entry
  *   'pin_setup'     → create 4-digit PIN
@@ -27,16 +25,30 @@ import {
   ActivityIndicator, Dimensions, Animated, Vibration,
 } from 'react-native';
 
-import * as Google             from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as WebBrowser          from 'expo-web-browser';
+
+// Native Firebase Auth (required for phone OTP on Android/iOS)
+let nativeFirebaseAuth = null;
+try {
+  nativeFirebaseAuth = require('@react-native-firebase/auth').default;
+} catch (e) {
+  console.log('[Auth] @react-native-firebase/auth not available, native phone OTP disabled');
+}
+
+// Native Google Sign-In — safe import (may not be linked in all builds)
+let GoogleSignin = null;
+try {
+  GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
+} catch (e) {
+  console.log('[Auth] @react-native-google-signin not available, will use fallback');
+}
 
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  sendSignInLinkToEmail,
   PhoneAuthProvider,
   signInWithCredential,
   signInAnonymously,
@@ -215,23 +227,21 @@ export default function AuthScreen({ onDuressTriggered }) {
     finally { setLoadingKey(null); }
   };
 
-  // ── Google OAuth ─────────────────────────────────────────────
-  const [, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
-    clientId:        'YOUR_EXPO_CLIENT_ID.apps.googleusercontent.com',
-    iosClientId:     'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
-    androidClientId: 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
-  });
+  // ── Google Sign-In (native — no browser redirect) ──────────
+  const GOOGLE_WEB_CLIENT_ID = '684405408737-uuvrtio9cmcuhpgmt1jv0k5401hu0otp.apps.googleusercontent.com';
 
   useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const { id_token } = googleResponse.params;
-      run('google', async () => {
-        const cred = GoogleAuthProvider.credential(id_token);
-        await signInWithCredential(auth, cred);
-        await authenticate('google');
-      });
+    if (GoogleSignin) {
+      try {
+        GoogleSignin.configure({
+          webClientId: GOOGLE_WEB_CLIENT_ID,
+          offlineAccess: true,
+        });
+      } catch (e) {
+        console.log('[Auth] GoogleSignin.configure failed:', e);
+      }
     }
-  }, [googleResponse]);
+  }, []);
 
   // ── Recaptcha ref (Phone OTP — invisible verifier) ──────────
   const recaptchaRef = useRef(null);
@@ -255,11 +265,9 @@ export default function AuthScreen({ onDuressTriggered }) {
 
       {/* Animated view container */}
       <Animated.View style={[{ flex: 1 }, { transform: [{ translateX: slideAnim }] }]}>
-        {view === 'home'         && <HomeView         goTo={goTo} run={run} loadingKey={loadingKey} promptGoogleAsync={promptGoogleAsync} recaptchaRef={recaptchaRef} authenticate={authenticate} showError={showError} biometricEnabled={biometricEnabled} pin={pin} />}
+        {view === 'home'         && <HomeView         goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} showError={showError} biometricEnabled={biometricEnabled} pin={pin} />}
         {view === 'register'     && <RegisterView     goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} />}
         {view === 'password'     && <PasswordView     goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} />}
-        {view === 'magic'        && <MagicView        goTo={goTo} run={run} loadingKey={loadingKey} setView={setView} />}
-        {view === 'magic_sent'   && <MagicSentView    goTo={goTo} setView={setView} />}
         {view === 'phone'        && <PhoneView        goTo={goTo} run={run} loadingKey={loadingKey} setView={setView} recaptchaRef={recaptchaRef} />}
         {view === 'otp'          && <OTPView          goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} showError={showError} />}
         {view === 'pin_setup'    && <PINView          goTo={goTo} mode="setup"   authenticate={authenticate} setupPin={setupPin} showError={showError} />}
@@ -273,13 +281,34 @@ export default function AuthScreen({ onDuressTriggered }) {
 // ────────────────────────────────────────────────────────────────
 //  HOME VIEW
 // ────────────────────────────────────────────────────────────────
-function HomeView({ goTo, run, loadingKey, promptGoogleAsync, recaptchaRef, authenticate, showError, biometricEnabled, pin }) {
+function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEnabled, pin }) {
 
-  const handleGoogle = () => run('google', async () => {
-    const result = await promptGoogleAsync();
-    if (result?.type === 'cancel') throw new Error('Google sign-in cancelled.');
-    // result success handled in useEffect above
-  });
+  const handleGoogle = () => {
+    if (!GoogleSignin) {
+      Alert.alert(
+        '🔧 Google Sign-In',
+        'Google Sign-In native module is not available in this build.\n\nPlease use Email/Password, Mobile OTP, or PIN to sign in.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    run('google', async () => {
+      try {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        const signInResult = await GoogleSignin.signIn();
+        const idToken = signInResult?.data?.idToken || signInResult?.idToken;
+        if (!idToken) throw new Error('Failed to get Google ID token.');
+        const credential = GoogleAuthProvider.credential(idToken);
+        await signInWithCredential(auth, credential);
+        await authenticate('google');
+      } catch (e) {
+        if (e?.code === 'SIGN_IN_CANCELLED' || e?.code === '12501') {
+          throw new Error('Google sign-in cancelled.');
+        }
+        throw e;
+      }
+    });
+  };
 
   const handleFacebook = () => Alert.alert(
     '📘 Facebook Login',
@@ -415,9 +444,7 @@ function HomeView({ goTo, run, loadingKey, promptGoogleAsync, recaptchaRef, auth
 const AUTH_CARDS = [
   { id: 'passkey',  view: null,      icon: '🔑', label: 'Passkey',       sub: 'Face ID / Fingerprint',     border: C.purple },
   { id: 'password', view: 'password', icon: '🔐', label: 'Password',      sub: 'Email & password',          border: '#00BCD4' },
-  { id: 'magic',    view: 'magic',    icon: '✨', label: 'Magic Link',    sub: 'Passwordless email',        border: C.gold },
   { id: 'phone',    view: 'phone',    icon: '📱', label: 'Mobile OTP',   sub: 'SMS one-time code',          border: '#4CAF50' },
-  { id: 'emailotp', view: 'magic',    icon: '📧', label: 'Email OTP',    sub: 'Link sent to inbox',         border: '#2196F3' },
 ];
 
 // ────────────────────────────────────────────────────────────────
@@ -552,72 +579,10 @@ function PasswordView({ goTo, run, loadingKey, authenticate }) {
 }
 
 // ────────────────────────────────────────────────────────────────
-//  MAGIC LINK VIEW
-// ────────────────────────────────────────────────────────────────
-const MAGIC_ACTION_CODE_SETTINGS = {
-  url: 'https://safeher-app.page.link/finish-signin',
-  handleCodeInApp: true,
-  android: { packageName: 'com.safeher.app', installApp: true },
-  iOS:     { bundleId:    'com.safeher.app' },
-};
-
-function MagicView({ goTo, run, loadingKey, setView }) {
-  const [email, setEmail] = useState('');
-
-  const handleSend = () => run('magic', async () => {
-    if (!email.trim()) throw new Error('Please enter your email address.');
-    await sendSignInLinkToEmail(auth, email.trim(), MAGIC_ACTION_CODE_SETTINGS);
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-    await AsyncStorage.setItem('safeher_magic_email', email.trim());
-    setView('magic_sent');
-  });
-
-  return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={S.formScroll}>
-        <BackBtn onPress={() => goTo('home')} />
-        <ViewHeader icon="✨" title="Magic Link" sub="Enter your email — we'll send a passwordless sign-in link" />
-
-        <Label>Email Address</Label>
-        <GlassInput placeholder="you@example.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoFocus />
-
-        <View style={S.infoCard}>
-          <Text style={{ color: '#B0BEC5', fontSize: 12, lineHeight: 18 }}>
-            📌 No password needed. Tap the link in your email to sign in instantly.
-          </Text>
-        </View>
-
-        <PrimaryBtn onPress={handleSend} loading={loadingKey === 'magic'} style={{ marginTop: 8 }}>
-          Send Magic Link ✨
-        </PrimaryBtn>
-      </View>
-    </KeyboardAvoidingView>
-  );
-}
-
-function MagicSentView({ goTo, setView }) {
-  return (
-    <View style={[S.formScroll, { alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={{ fontSize: 80, marginBottom: 24 }}>✉️</Text>
-      <Text style={{ fontSize: 26, fontWeight: '900', color: C.white, marginBottom: 12 }}>Check Your Inbox!</Text>
-      <Text style={{ color: C.textSub, fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 32 }}>
-        A magic sign-in link was sent to your email.{'\n'}Tap the link to sign in. It expires in 1 hour.
-      </Text>
-      <PressBtn style={[S.primaryBtn, { paddingHorizontal: 32 }]} onPress={() => setView('magic')}>
-        <Text style={{ color: C.white, fontWeight: '800', fontSize: 15 }}>Resend Link</Text>
-      </PressBtn>
-      <TouchableOpacity style={{ marginTop: 20 }} onPress={() => goTo('home')}>
-        <Text style={{ color: C.textSub, fontWeight: '700' }}>← Back to Login</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────
 //  PHONE VIEW
 // ────────────────────────────────────────────────────────────────
 // We store verificationId in a module-level ref so OTPView can read it
-const phoneVerificationRef = { id: null, number: null };
+const phoneVerificationRef = { id: null, number: null, confirmation: null };
 
 function PhoneView({ goTo, run, loadingKey, setView, recaptchaRef }) {
   const [selectedCC,    setSelectedCC]    = useState(COUNTRY_CODES[0]);
@@ -627,12 +592,32 @@ function PhoneView({ goTo, run, loadingKey, setView, recaptchaRef }) {
   const handleSend = () => run('phone', async () => {
     const full = `${selectedCC.code}${phone.replace(/\D/g, '')}`;
     if (phone.replace(/\D/g, '').length < 7) throw new Error('Please enter a valid phone number.');
+
+    if (Platform.OS !== 'web') {
+      if (!nativeFirebaseAuth) {
+        throw new Error(
+          'Phone OTP is not available in this build.\n\n'
+          + 'Install @react-native-firebase/app and @react-native-firebase/auth, '
+          + 'then rebuild the app (expo run:android or a fresh dev build).'
+        );
+      }
+
+      // Native Firebase flow for Android/iOS
+      const confirmation = await nativeFirebaseAuth().signInWithPhoneNumber(full);
+      phoneVerificationRef.id = null;
+      phoneVerificationRef.number = full;
+      phoneVerificationRef.confirmation = confirmation;
+      setView('otp');
+      return;
+    }
+
     const { RecaptchaVerifier } = await import('firebase/auth');
     const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
     const provider = new PhoneAuthProvider(auth);
     const vId = await provider.verifyPhoneNumber(full, verifier);
     phoneVerificationRef.id     = vId;
     phoneVerificationRef.number = full;
+    phoneVerificationRef.confirmation = null;
     setView('otp');
   });
 
@@ -697,9 +682,16 @@ function OTPView({ goTo, run, loadingKey, authenticate, showError }) {
   const verifyOTP = () => run('otp', async () => {
     const code = digits.join('');
     if (code.length !== 6) throw new Error('Please enter all 6 digits.');
-    if (!phoneVerificationRef.id) throw new Error('Session expired. Please resend OTP.');
-    const cred = PhoneAuthProvider.credential(phoneVerificationRef.id, code);
-    await signInWithCredential(auth, cred);
+
+    if (Platform.OS !== 'web') {
+      if (!phoneVerificationRef.confirmation) throw new Error('Session expired. Please resend OTP.');
+      await phoneVerificationRef.confirmation.confirm(code);
+    } else {
+      if (!phoneVerificationRef.id) throw new Error('Session expired. Please resend OTP.');
+      const cred = PhoneAuthProvider.credential(phoneVerificationRef.id, code);
+      await signInWithCredential(auth, cred);
+    }
+
     await authenticate('phone', { phone: phoneVerificationRef.number || '' });
   });
 
@@ -946,23 +938,49 @@ function Divider({ label }) {
 // ────────────────────────────────────────────────────────────────
 //  FRIENDLY ERRORS
 // ────────────────────────────────────────────────────────────────
+const FIREBASE_SETUP_MSG = 'This sign-in method is not enabled yet.\n\n'
+  + 'Go to Firebase Console → Authentication → Sign-in method and enable the required provider.\n\n'
+  + 'Firebase project: safeher-app-242a1';
+
 const friendlyError = (e) => {
   if (typeof e === 'string') return e;
   const code = e?.code || '';
+  const msg  = e?.message || '';
   const map  = {
-    'auth/invalid-email':             'Please enter a valid email address.',
-    'auth/user-not-found':            'No account found with this email.',
-    'auth/wrong-password':            'Incorrect password. Please try again.',
-    'auth/email-already-in-use':      'An account with this email already exists.',
-    'auth/weak-password':             'Password must be at least 6 characters.',
-    'auth/too-many-requests':         'Too many attempts. Please wait and try again.',
-    'auth/network-request-failed':    'No internet connection. Please check your network.',
-    'auth/invalid-verification-code': 'Invalid OTP. Please check the code and try again.',
-    'auth/invalid-phone-number':      'Please enter a valid phone number with country code.',
-    'auth/quota-exceeded':            'SMS quota exceeded. Please try again later.',
-    'auth/popup-closed-by-user':      'Sign-in was cancelled.',
-    'ERR_CANCELED':                   'Sign-in was cancelled.',
+    'auth/invalid-email':              'Please enter a valid email address.',
+    'auth/user-not-found':             'No account found with this email.',
+    'auth/wrong-password':             'Incorrect password. Please try again.',
+    'auth/invalid-credential':         'Invalid email or password. Please try again.',
+    'auth/email-already-in-use':       'An account with this email already exists.',
+    'auth/weak-password':              'Password must be at least 6 characters.',
+    'auth/too-many-requests':          'Too many attempts. Please wait and try again.',
+    'auth/network-request-failed':     'No internet connection. Please check your network.',
+    'auth/invalid-verification-code':  'Invalid OTP. Please check the code and try again.',
+    'auth/invalid-phone-number':       'Please enter a valid phone number with country code.',
+    'auth/quota-exceeded':             'SMS quota exceeded. Please try again later.',
+    'auth/billing-not-enabled':        'Phone OTP requires Firebase Blaze plan.\n\nFix: Firebase Console → Project Settings → Upgrade to Blaze (pay-as-you-go) → then enable Phone provider under Authentication → Sign-in method.',
+    'auth/popup-closed-by-user':       'Sign-in was cancelled.',
+    'auth/user-disabled':              'This account has been disabled. Contact support.',
+    'auth/operation-not-allowed':      FIREBASE_SETUP_MSG,
+    'auth/configuration-not-found':    FIREBASE_SETUP_MSG,
+    'auth/admin-restricted-operation': FIREBASE_SETUP_MSG,
+    'auth/unauthorized-domain':        'This domain is not authorized. Add it in Firebase Console → Authentication → Settings → Authorized domains.',
+    'auth/invalid-action-code':        'This link has expired or already been used. Please request a new one.',
+    'auth/missing-android-pkg-name':   'Android package name is missing in magic link settings.',
+    'auth/missing-continue-uri':       'Continue URL is missing in magic link settings.',
+    'ERR_CANCELED':                    'Sign-in was cancelled.',
   };
+
+  // Handle "config not found" variations
+  if (code.includes('config') || msg.toLowerCase().includes('config-not-found') || msg.toLowerCase().includes('configuration-not-found')) {
+    return FIREBASE_SETUP_MSG;
+  }
+
+  // Handle billing-not-enabled (sometimes arrives without auth/ prefix)
+  if (code.includes('billing') || msg.toLowerCase().includes('billing')) {
+    return 'Phone OTP requires Firebase Blaze plan.\n\nFix: Firebase Console → Project Settings → Upgrade to Blaze (pay-as-you-go) → then enable Phone provider under Authentication → Sign-in method.';
+  }
+
   return map[code] || e?.message || 'Something went wrong. Please try again.';
 };
 

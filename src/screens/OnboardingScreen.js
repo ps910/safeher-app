@@ -5,7 +5,7 @@
  * 
  * v1.0 — SafeHer App
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Dimensions,
   ScrollView, Platform, StatusBar, Alert, Animated,
@@ -81,6 +81,39 @@ export default function OnboardingScreen({ onComplete }) {
   const scrollRef = useRef(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
+  // Check if all required permissions are granted
+  const allPermissionsGranted = 
+    permissionStatus.location === true && 
+    permissionStatus.notifications === true && 
+    permissionStatus.microphone === true;
+
+  // Auto-request permissions when reaching the permissions page
+  useEffect(() => {
+    if (currentPage === 2) {
+      checkCurrentPermissions();
+    }
+  }, [currentPage]);
+
+  const checkCurrentPermissions = async () => {
+    const results = {};
+    try {
+      const { status: locStatus } = await Location.getForegroundPermissionsAsync();
+      results.location = locStatus === 'granted';
+    } catch { results.location = false; }
+    try {
+      const { status: notifStatus } = await Notifications.getPermissionsAsync();
+      results.notifications = notifStatus === 'granted';
+    } catch { results.notifications = false; }
+    try {
+      const { status: micStatus } = await Audio.getPermissionsAsync();
+      results.microphone = micStatus === 'granted';
+    } catch { results.microphone = false; }
+    try {
+      results.biometrics = await LocalAuthentication.hasHardwareAsync();
+    } catch { results.biometrics = false; }
+    setPermissionStatus(results);
+  };
+
   const goToPage = (index) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
       setCurrentPage(index);
@@ -93,12 +126,27 @@ export default function OnboardingScreen({ onComplete }) {
     if (currentPage < PAGES.length - 1) {
       goToPage(currentPage + 1);
     } else {
+      // On last page (permissions), require all permissions before proceeding
+      if (!allPermissionsGranted) {
+        Alert.alert(
+          'Permissions Required',
+          'SafeHer needs Location, Notifications, and Microphone permissions to keep you safe. Please grant all permissions to continue.',
+          [
+            { text: 'Grant Permissions', onPress: requestAllPermissions },
+          ]
+        );
+        return;
+      }
       finishOnboarding();
     }
   };
 
   const handleSkip = () => {
-    finishOnboarding();
+    // Only allow skip on pages before the permissions page
+    if (currentPage < PAGES.length - 1) {
+      goToPage(PAGES.length - 1); // Jump to permissions page
+    }
+    // Cannot skip permissions page
   };
 
   const finishOnboarding = async () => {
@@ -149,15 +197,19 @@ export default function OnboardingScreen({ onComplete }) {
 
     setPermissionStatus(results);
 
-    const granted = Object.values(results).filter(Boolean).length;
-    const total = Object.values(results).length;
+    const requiredGranted = results.location && results.notifications && results.microphone;
 
-    if (granted === total) {
+    if (requiredGranted) {
       Alert.alert('All Set! ✅', 'All permissions granted. You\'re ready to use SafeHer!');
     } else {
+      const missing = [];
+      if (!results.location) missing.push('Location');
+      if (!results.notifications) missing.push('Notifications');
+      if (!results.microphone) missing.push('Microphone');
       Alert.alert(
-        'Permissions',
-        `${granted}/${total} permissions granted. You can change these later in Settings.`
+        'Permissions Needed',
+        `Please grant: ${missing.join(', ')}\n\nThese are required for SafeHer to protect you. If denied, go to Settings → Apps → SafeHer → Permissions to enable them.`,
+        [{ text: 'OK' }]
       );
     }
   };
@@ -168,15 +220,17 @@ export default function OnboardingScreen({ onComplete }) {
     <View style={[styles.container, { backgroundColor: isDark ? colors.background : COLORS.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      {/* Skip Button */}
-      <TouchableOpacity
-        style={styles.skipBtn}
-        onPress={handleSkip}
-        accessibilityLabel="Skip onboarding"
-        accessibilityRole="button"
-      >
-        <Text style={[styles.skipText, { color: colors.textSecondary }]}>Skip</Text>
-      </TouchableOpacity>
+      {/* Skip Button — hidden on permissions page */}
+      {currentPage < PAGES.length - 1 && (
+        <TouchableOpacity
+          style={styles.skipBtn}
+          onPress={handleSkip}
+          accessibilityLabel="Skip to permissions"
+          accessibilityRole="button"
+        >
+          <Text style={[styles.skipText, { color: colors.textSecondary }]}>Skip</Text>
+        </TouchableOpacity>
+      )}
 
       <ScrollView
         ref={scrollRef}
@@ -284,7 +338,11 @@ export default function OnboardingScreen({ onComplete }) {
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[styles.nextBtn, { backgroundColor: page.iconColor }]}
+            style={[styles.nextBtn, { 
+              backgroundColor: (currentPage === PAGES.length - 1 && !allPermissionsGranted) 
+                ? '#999' 
+                : page.iconColor 
+            }]}
             onPress={handleNext}
             accessibilityLabel={currentPage === PAGES.length - 1 ? 'Get started' : 'Next page'}
             accessibilityRole="button"
