@@ -276,12 +276,42 @@ export default function AuthScreen({ onDuressTriggered }) {
 //  HOME VIEW
 // ────────────────────────────────────────────────────────────────
 function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEnabled }) {
+  // ── Entrance animations ─────────────────────────────────────
+  const heroFade  = useRef(new Animated.Value(0)).current;
+  const heroSlide = useRef(new Animated.Value(40)).current;
+  const cardsFade = useRef(new Animated.Value(0)).current;
+  const cardsSlide = useRef(new Animated.Value(30)).current;
+  const btnsFade  = useRef(new Animated.Value(0)).current;
+  const ctaGlow   = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    // Staggered entrance
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(heroFade,  { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.spring(heroSlide, { toValue: 0, tension: 50, friction: 8, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(cardsFade,  { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.spring(cardsSlide, { toValue: 0, tension: 60, friction: 8, useNativeDriver: true }),
+      ]),
+      Animated.timing(btnsFade, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+
+    // Pulsing glow on CTA
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(ctaGlow, { toValue: 0.8, duration: 1500, useNativeDriver: true }),
+        Animated.timing(ctaGlow, { toValue: 0.3, duration: 1500, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
 
   const handleGoogle = () => {
     if (!GoogleSignin) {
       Alert.alert(
         '🔧 Google Sign-In',
-        'Google Sign-In native module is not available in this build.\n\nPlease use Email/Password, Mobile OTP, or PIN to sign in.',
+        'Google Sign-In native module is not available in this build.\n\nPlease use Email/Password, Mobile OTP, or Biometric to sign in.',
         [{ text: 'OK' }]
       );
       return;
@@ -303,12 +333,6 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
       }
     });
   };
-
-  const handleFacebook = () => Alert.alert(
-    '📘 Facebook Login',
-    'To enable Facebook login:\n1. Go to Firebase Console → Authentication → Sign-in method\n2. Enable Facebook provider\n3. Add your Facebook App ID & Secret\n4. Add the OAuth redirect URI to your Facebook App',
-    [{ text: 'Got it', style: 'default' }]
-  );
 
   const handleApple = () => run('apple', async () => {
     const cred = await AppleAuthentication.signInAsync({
@@ -353,36 +377,45 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
 
   return (
     <ScrollView contentContainerStyle={S.homeScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      {/* Hero Brand */}
-      <View style={S.brandWrap}>
+      {/* ── Hero Brand (animated entrance) ── */}
+      <Animated.View style={[S.brandWrap, { opacity: heroFade, transform: [{ translateY: heroSlide }] }]}>
+        <View style={S.brandGlow} />
         <Text style={S.brandIcon}>🌸</Text>
         <Text style={S.brandName}>SafeHer</Text>
         <Text style={S.brandTag}>Your Personal Safety Guardian</Text>
         <View style={S.trustBadge}>
-          <Text style={S.trustText}>🛡️ Trusted by thousands · 🔒 End-to-end encrypted</Text>
+          <Text style={S.trustText}>🛡️ Trusted by thousands  ·  🔒 End-to-end encrypted</Text>
         </View>
-      </View>
+      </Animated.View>
 
-      {/* Social Sign-In */}
-      <PressBtn style={S.googleBtn} onPress={handleGoogle} disabled={!!loadingKey}>
-        <Text style={S.socialIcon}>G</Text>
-        <Text style={S.socialText}>Continue with Google</Text>
-        <Spinner id="google" />
-      </PressBtn>
-
-      {Platform.OS === 'ios' && (
-        <PressBtn style={S.appleBtn} onPress={handleApple} disabled={!!loadingKey}>
-          <Text style={[S.socialIcon, { color: '#000' }]}></Text>
-          <Text style={[S.socialText, { color: '#000' }]}>Continue with Apple</Text>
-          <Spinner id="apple" />
+      {/* ── Social Sign-In (glassmorphic) ── */}
+      <Animated.View style={{ opacity: heroFade }}>
+        <PressBtn style={S.googleBtn} onPress={handleGoogle} disabled={!!loadingKey}>
+          <View style={S.googleIconWrap}>
+            <Text style={S.googleIconText}>G</Text>
+          </View>
+          <Text style={S.socialText}>Continue with Google</Text>
+          <Spinner id="google" />
+          <Text style={{ color: C.textHint, fontSize: 16 }}>→</Text>
         </PressBtn>
-      )}
 
-      {/* Divider */}
+        {Platform.OS === 'ios' && (
+          <PressBtn style={S.appleBtn} onPress={handleApple} disabled={!!loadingKey}>
+            <View style={S.appleIconWrap}>
+              <Text style={{ fontSize: 16, color: '#000' }}></Text>
+            </View>
+            <Text style={[S.socialText, { color: '#000' }]}>Continue with Apple</Text>
+            <Spinner id="apple" />
+            <Text style={{ color: '#999', fontSize: 16 }}>→</Text>
+          </PressBtn>
+        )}
+      </Animated.View>
+
+      {/* ── Divider ── */}
       <Divider label="MORE OPTIONS" />
 
-      {/* Auth Method Cards */}
-      <View style={S.cardGrid}>
+      {/* ── Auth Method Cards (animated) ── */}
+      <Animated.View style={[S.cardGrid, { opacity: cardsFade, transform: [{ translateY: cardsSlide }] }]}>
         {AUTH_CARDS.map(card => (
           <PressBtn
             key={card.id}
@@ -393,30 +426,37 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
             }}
             disabled={!!loadingKey}
           >
-            <Text style={S.cardIcon}>{card.icon}</Text>
+            <View style={[S.cardIconBg, { backgroundColor: card.border + '18' }]}>
+              <Text style={S.cardIcon}>{card.icon}</Text>
+            </View>
             <Text style={S.cardLabel}>{card.label}</Text>
             <Text style={S.cardSub}>{card.sub}</Text>
             {loadingKey === card.id && <ActivityIndicator color={card.border} size="small" style={{ marginTop: 6 }} />}
           </PressBtn>
         ))}
-      </View>
+      </Animated.View>
 
-      {/* Bottom Actions */}
-      <View style={S.bottomActions}>
-        <PressBtn style={S.createBtn} onPress={() => goTo('register')} disabled={!!loadingKey}>
-          <Text style={{ fontSize: 16, fontWeight: '900', color: C.white }}>Create Account</Text>
-        </PressBtn>
+      {/* ── Bottom Actions (animated) ── */}
+      <Animated.View style={[S.bottomActions, { opacity: btnsFade }]}>
+        <View>
+          <Animated.View style={[S.ctaGlowBg, { opacity: ctaGlow }]} />
+          <PressBtn style={S.createBtn} onPress={() => goTo('register')} disabled={!!loadingKey}>
+            <Text style={S.createBtnText}>Create Account  →</Text>
+          </PressBtn>
+        </View>
 
         <PressBtn style={S.quickBtn} onPress={handleQuickStart} disabled={!!loadingKey}>
           {loadingKey === 'quick'
             ? <ActivityIndicator color={C.primary} size="small" />
-            : <Text style={{ fontSize: 14, fontWeight: '700', color: C.textSub }}>⚡ Quick Start as Guest</Text>}
+            : <Text style={S.quickBtnText}>⚡ Quick Start as Guest</Text>}
         </PressBtn>
-      </View>
+      </Animated.View>
 
-      {/* Footer */}
+      {/* ── Footer ── */}
       <View style={S.footerWrap}>
-        <Text style={S.footerNote}>🔒 Your data stays on device · Privacy first</Text>
+        <View style={S.footerDivider} />
+        <Text style={S.footerNote}>🔒 Your data stays on device  ·  Privacy first</Text>
+        <Text style={S.footerVersion}>SafeHer v7.0</Text>
       </View>
     </ScrollView>
   );
@@ -878,79 +918,102 @@ const S = StyleSheet.create({
 
   // Home
   homeScroll: {
-    paddingTop: 60,
-    paddingHorizontal: 22,
-    paddingBottom: 40,
+    paddingTop: 56,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
   },
-  brandWrap: { alignItems: 'center', marginBottom: 36 },
-  brandIcon: { fontSize: 64 },
-  brandName: { fontSize: 38, fontWeight: '900', color: C.white, marginTop: 8, letterSpacing: -0.8 },
-  brandTag:  { fontSize: 14, color: C.textSub, marginTop: 6, letterSpacing: 0.3 },
-  trustBadge: {
-    marginTop: 14, backgroundColor: 'rgba(233,30,99,0.08)',
-    borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16,
-    borderWidth: 1, borderColor: 'rgba(233,30,99,0.15)',
-  },
-  trustText: { fontSize: 11, color: C.accent, fontWeight: '600', letterSpacing: 0.2 },
 
-  // Social buttons
+  // Brand / Hero
+  brandWrap: { alignItems: 'center', marginBottom: 40, position: 'relative' },
+  brandGlow: {
+    position: 'absolute', top: -20, width: 180, height: 180, borderRadius: 90,
+    backgroundColor: C.primaryGlow, opacity: 0.3,
+  },
+  brandIcon: { fontSize: 72, marginBottom: 4 },
+  brandName: { fontSize: 42, fontWeight: '900', color: C.white, letterSpacing: -1 },
+  brandTag:  { fontSize: 15, color: C.textSub, marginTop: 6, letterSpacing: 0.5, fontWeight: '500' },
+  trustBadge: {
+    marginTop: 18, backgroundColor: 'rgba(233,30,99,0.06)',
+    borderRadius: 24, paddingVertical: 10, paddingHorizontal: 20,
+    borderWidth: 1, borderColor: 'rgba(233,30,99,0.12)',
+  },
+  trustText: { fontSize: 11, color: C.accent, fontWeight: '600', letterSpacing: 0.3 },
+
+  // Social buttons — glassmorphic
   googleBtn: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.google,
-    paddingVertical: 14, paddingHorizontal: 20,
-    borderRadius: 16, marginBottom: 10, elevation: 4,
+    backgroundColor: C.card,
+    paddingVertical: 16, paddingHorizontal: 18,
+    borderRadius: 18, marginBottom: 12, elevation: 6,
+    borderWidth: 1, borderColor: 'rgba(219,68,55,0.25)',
   },
-  fbBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.facebook,
-    paddingVertical: 14, paddingHorizontal: 20,
-    borderRadius: 16, marginBottom: 10, elevation: 4,
+  googleIconWrap: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: C.google,
+    alignItems: 'center', justifyContent: 'center',
   },
+  googleIconText: { fontSize: 18, fontWeight: '900', color: C.white },
   appleBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: C.apple,
-    paddingVertical: 14, paddingHorizontal: 20,
-    borderRadius: 16, marginBottom: 10, elevation: 4,
+    paddingVertical: 16, paddingHorizontal: 18,
+    borderRadius: 18, marginBottom: 12, elevation: 6,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)',
   },
-  socialIcon: { fontSize: 18, fontWeight: '900', color: C.white, width: 28, textAlign: 'center' },
-  socialText: { flex: 1, color: C.white, fontWeight: '700', fontSize: 15, marginLeft: 6 },
+  appleIconWrap: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: '#000',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  socialText: { flex: 1, color: C.white, fontWeight: '700', fontSize: 15, marginLeft: 14 },
 
   // Divider
-  dividerOuter: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
-  divLine2:     { flex: 1, height: 1, backgroundColor: C.border },
-  divLabel:     { color: C.textHint, fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginHorizontal: 12 },
+  dividerOuter: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
+  divLine2:     { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
+  divLabel:     { color: C.textHint, fontSize: 10, fontWeight: '700', letterSpacing: 2, marginHorizontal: 16 },
 
   // Auth method card grid
   cardGrid: {
     flexDirection: 'row', justifyContent: 'space-between',
-    gap: 10, marginBottom: 24,
+    gap: 12, marginBottom: 28,
   },
   authCard: {
-    flex: 1, borderRadius: 20, padding: 16,
-    alignItems: 'center', minHeight: 120,
+    flex: 1, borderRadius: 22, paddingVertical: 20, paddingHorizontal: 12,
+    alignItems: 'center', minHeight: 140,
     backgroundColor: C.card,
-    borderWidth: 1.5, elevation: 4,
+    borderWidth: 1.5, elevation: 6,
   },
-  cardIcon:  { fontSize: 30, marginBottom: 8 },
-  cardLabel: { fontSize: 13, fontWeight: '800', color: C.white, textAlign: 'center' },
-  cardSub:   { fontSize: 9,  color: C.textSub, textAlign: 'center', marginTop: 4, lineHeight: 13 },
+  cardIconBg: {
+    width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+    marginBottom: 10,
+  },
+  cardIcon:  { fontSize: 26 },
+  cardLabel: { fontSize: 13, fontWeight: '800', color: C.white, textAlign: 'center', marginBottom: 4 },
+  cardSub:   { fontSize: 10, color: C.textSub, textAlign: 'center', lineHeight: 14 },
 
   // Bottom actions
-  bottomActions: { gap: 12, marginBottom: 24 },
+  bottomActions: { gap: 14, marginBottom: 28 },
+  ctaGlowBg: {
+    position: 'absolute', top: -4, left: -4, right: -4, bottom: -4,
+    borderRadius: 20, backgroundColor: C.primaryGlow,
+  },
   createBtn: {
     backgroundColor: C.primary, borderRadius: 16,
-    paddingVertical: 16, alignItems: 'center', elevation: 6,
-    shadowColor: C.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 12,
+    paddingVertical: 18, alignItems: 'center', elevation: 8,
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5, shadowRadius: 16,
   },
+  createBtnText: { fontSize: 17, fontWeight: '900', color: C.white, letterSpacing: 0.3 },
   quickBtn: {
-    borderRadius: 16, paddingVertical: 14,
-    alignItems: 'center', borderWidth: 1.5, borderColor: C.border,
+    borderRadius: 16, paddingVertical: 15,
+    alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.06)',
     backgroundColor: C.surface,
   },
+  quickBtnText: { fontSize: 14, fontWeight: '700', color: C.textSub },
 
-  footerWrap: { alignItems: 'center', paddingBottom: 16 },
+  // Footer
+  footerWrap: { alignItems: 'center', paddingBottom: 20 },
+  footerDivider: { width: 40, height: 2, borderRadius: 1, backgroundColor: C.border, marginBottom: 14 },
   footerNote: { textAlign: 'center', color: C.textHint, fontSize: 11 },
+  footerVersion: { textAlign: 'center', color: 'rgba(255,255,255,0.04)', fontSize: 10, marginTop: 8, fontWeight: '600' },
 
   // Toast
   toast: {
