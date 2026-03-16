@@ -81,6 +81,9 @@ function AppBootstrap() {
       setPhase('Loading onboarding...');
       const onboardingModule = await import('./src/screens/OnboardingScreen');
 
+      setPhase('Loading security setup...');
+      const securitySetupModule = await import('./src/screens/SecuritySetupScreen');
+
       setModules({
         NavigationContainer: navModule.NavigationContainer,
         SafeAreaProvider: safeAreaModule.SafeAreaProvider,
@@ -93,6 +96,8 @@ function AppBootstrap() {
         AppNavigator: navigatorModule.default,
         OnboardingScreen: onboardingModule.default,
         isOnboardingComplete: onboardingModule.isOnboardingComplete,
+        SecuritySetupScreen: securitySetupModule.default,
+        isSecuritySetupComplete: securitySetupModule.isSecuritySetupComplete,
       });
       setPhase('ready');
     } catch (e) {
@@ -144,10 +149,11 @@ function AppWithModules({ modules }) {
 
 function AppInner({ modules }) {
   const { NavigationContainer, AuthScreen, AppNavigator, OnboardingScreen, isOnboardingComplete,
-    useAuth, useEmergency, sendSOSToContacts } = modules;
-  const { isAuthenticated, isLoading, lock } = useAuth();
+    useAuth, useEmergency, sendSOSToContacts, SecuritySetupScreen, isSecuritySetupComplete } = modules;
+  const { isAuthenticated, isLoading, lock, pin, setupPin, toggleBiometric } = useAuth();
   const emergency = useEmergency();
   const [onboardingDone, setOnboardingDone] = useState(null); // null = checking
+  const [securitySetupDone, setSecuritySetupDone] = useState(null); // null = checking
 
   // Check onboarding status
   useEffect(() => {
@@ -160,6 +166,24 @@ function AppInner({ modules }) {
       setOnboardingDone(done);
     } catch (e) {
       setOnboardingDone(true); // Skip if error
+    }
+  };
+
+  // Check security setup status after authentication
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkSecuritySetup();
+    } else {
+      setSecuritySetupDone(null);
+    }
+  }, [isAuthenticated]);
+
+  const checkSecuritySetup = async () => {
+    try {
+      const done = await isSecuritySetupComplete(pin);
+      setSecuritySetupDone(done);
+    } catch {
+      setSecuritySetupDone(true); // Skip if error
     }
   };
 
@@ -249,6 +273,26 @@ function AppInner({ modules }) {
 
   if (!isAuthenticated) {
     return <AuthScreen onDuressTriggered={handleDuress} />;
+  }
+
+  // Show security setup for first-time users
+  if (securitySetupDone === null) {
+    return (
+      <View style={loadStyles.container}>
+        <ActivityIndicator size="large" color="#E91E63" />
+        <Text style={loadStyles.text}>Checking security...</Text>
+      </View>
+    );
+  }
+
+  if (!securitySetupDone) {
+    return (
+      <SecuritySetupScreen
+        onComplete={() => setSecuritySetupDone(true)}
+        setupPin={setupPin}
+        toggleBiometric={toggleBiometric}
+      />
+    );
   }
 
   return (

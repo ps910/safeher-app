@@ -13,9 +13,6 @@
  *   'password'      → email + password login
  *   'phone'         → phone number + country code
  *   'otp'           → 6-digit OTP entry
- *   'pin_setup'     → create 4-digit PIN
- *   'pin_confirm'   → confirm PIN
- *   'pin_verify'    → enter existing PIN
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -197,7 +194,7 @@ function PasswordStrength({ password }) {
 //  MAIN SCREEN
 // ────────────────────────────────────────────────────────────────
 export default function AuthScreen({ onDuressTriggered }) {
-  const { authenticate, pin, biometricEnabled, setupPin } = useAuth();
+  const { authenticate, biometricEnabled } = useAuth();
 
   // ── Internal nav state ───────────────────────────────────────
   const [view, setView] = useState('home'); // view name
@@ -265,14 +262,11 @@ export default function AuthScreen({ onDuressTriggered }) {
 
       {/* Animated view container */}
       <Animated.View style={[{ flex: 1 }, { transform: [{ translateX: slideAnim }] }]}>
-        {view === 'home'         && <HomeView         goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} showError={showError} biometricEnabled={biometricEnabled} pin={pin} />}
+        {view === 'home'         && <HomeView         goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} showError={showError} biometricEnabled={biometricEnabled} />}
         {view === 'register'     && <RegisterView     goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} />}
         {view === 'password'     && <PasswordView     goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} />}
         {view === 'phone'        && <PhoneView        goTo={goTo} run={run} loadingKey={loadingKey} setView={setView} recaptchaRef={recaptchaRef} />}
         {view === 'otp'          && <OTPView          goTo={goTo} run={run} loadingKey={loadingKey} authenticate={authenticate} showError={showError} />}
-        {view === 'pin_setup'    && <PINView          goTo={goTo} mode="setup"   authenticate={authenticate} setupPin={setupPin} showError={showError} />}
-        {view === 'pin_confirm'  && <PINView          goTo={goTo} mode="confirm" authenticate={authenticate} setupPin={setupPin} showError={showError} />}
-        {view === 'pin_verify'   && <PINView          goTo={goTo} mode="verify"  authenticate={authenticate} showError={showError} pin={pin} />}
       </Animated.View>
     </View>
   );
@@ -281,7 +275,7 @@ export default function AuthScreen({ onDuressTriggered }) {
 // ────────────────────────────────────────────────────────────────
 //  HOME VIEW
 // ────────────────────────────────────────────────────────────────
-function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEnabled, pin }) {
+function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEnabled }) {
 
   const handleGoogle = () => {
     if (!GoogleSignin) {
@@ -359,36 +353,36 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
 
   return (
     <ScrollView contentContainerStyle={S.homeScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      {/* Brand */}
+      {/* Hero Brand */}
       <View style={S.brandWrap}>
         <Text style={S.brandIcon}>🌸</Text>
         <Text style={S.brandName}>SafeHer</Text>
         <Text style={S.brandTag}>Your Personal Safety Guardian</Text>
+        <View style={S.trustBadge}>
+          <Text style={S.trustText}>🛡️ Trusted by thousands · 🔒 End-to-end encrypted</Text>
+        </View>
       </View>
 
-      {/* Social buttons */}
+      {/* Social Sign-In */}
       <PressBtn style={S.googleBtn} onPress={handleGoogle} disabled={!!loadingKey}>
         <Text style={S.socialIcon}>G</Text>
         <Text style={S.socialText}>Continue with Google</Text>
         <Spinner id="google" />
       </PressBtn>
 
-      <PressBtn style={S.fbBtn} onPress={handleFacebook} disabled={!!loadingKey}>
-        <Text style={S.socialIcon}>f</Text>
-        <Text style={S.socialText}>Continue with Facebook</Text>
-      </PressBtn>
-
-      <PressBtn style={S.appleBtn} onPress={handleApple} disabled={!!loadingKey}>
-        <Text style={[S.socialIcon, { color: '#000' }]}></Text>
-        <Text style={[S.socialText, { color: '#000' }]}>Continue with Apple</Text>
-        <Spinner id="apple" />
-      </PressBtn>
+      {Platform.OS === 'ios' && (
+        <PressBtn style={S.appleBtn} onPress={handleApple} disabled={!!loadingKey}>
+          <Text style={[S.socialIcon, { color: '#000' }]}></Text>
+          <Text style={[S.socialText, { color: '#000' }]}>Continue with Apple</Text>
+          <Spinner id="apple" />
+        </PressBtn>
+      )}
 
       {/* Divider */}
-      <Divider label="OR SIGN IN WITH" />
+      <Divider label="MORE OPTIONS" />
 
-      {/* Card grid */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.cardScroll}>
+      {/* Auth Method Cards */}
+      <View style={S.cardGrid}>
         {AUTH_CARDS.map(card => (
           <PressBtn
             key={card.id}
@@ -405,46 +399,33 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
             {loadingKey === card.id && <ActivityIndicator color={card.border} size="small" style={{ marginTop: 6 }} />}
           </PressBtn>
         ))}
-      </ScrollView>
+      </View>
 
-      {/* Divider */}
-      <Divider label="OR" />
-
-      {/* Bottom row */}
-      <View style={S.bottomRow}>
-        <PressBtn
-          style={S.pinBtn}
-          onPress={() => goTo(pin ? 'pin_verify' : 'pin_setup')}
-          disabled={!!loadingKey}
-        >
-          <Text style={S.bottomIcon}>🔒</Text>
-          <Text style={S.bottomLabel}>{pin ? 'Enter PIN' : 'Set Up PIN'}</Text>
-        </PressBtn>
-
+      {/* Bottom Actions */}
+      <View style={S.bottomActions}>
         <PressBtn style={S.createBtn} onPress={() => goTo('register')} disabled={!!loadingKey}>
-          <Text style={S.bottomIcon}>👤</Text>
-          <Text style={S.bottomLabel}>Create Account</Text>
+          <Text style={{ fontSize: 16, fontWeight: '900', color: C.white }}>Create Account</Text>
         </PressBtn>
 
         <PressBtn style={S.quickBtn} onPress={handleQuickStart} disabled={!!loadingKey}>
           {loadingKey === 'quick'
             ? <ActivityIndicator color={C.primary} size="small" />
-            : <>
-                <Text style={S.bottomIcon}>⚡</Text>
-                <Text style={[S.bottomLabel, { color: C.primary }]}>Quick Start</Text>
-              </>}
+            : <Text style={{ fontSize: 14, fontWeight: '700', color: C.textSub }}>⚡ Quick Start as Guest</Text>}
         </PressBtn>
       </View>
 
-      <Text style={S.footerNote}>🔒 End-to-end encrypted · Your data stays on device</Text>
+      {/* Footer */}
+      <View style={S.footerWrap}>
+        <Text style={S.footerNote}>🔒 Your data stays on device · Privacy first</Text>
+      </View>
     </ScrollView>
   );
 }
 
 const AUTH_CARDS = [
-  { id: 'passkey',  view: null,      icon: '🔑', label: 'Passkey',       sub: 'Face ID / Fingerprint',     border: C.purple },
-  { id: 'password', view: 'password', icon: '🔐', label: 'Password',      sub: 'Email & password',          border: '#00BCD4' },
-  { id: 'phone',    view: 'phone',    icon: '📱', label: 'Mobile OTP',   sub: 'SMS one-time code',          border: '#4CAF50' },
+  { id: 'passkey',  view: null,       icon: '🔑', label: 'Biometric',    sub: 'Face ID / Fingerprint',     border: C.purple },
+  { id: 'password', view: 'password', icon: '🔐', label: 'Email Login',  sub: 'Email & password',          border: '#00BCD4' },
+  { id: 'phone',    view: 'phone',    icon: '📱', label: 'Mobile OTP',   sub: 'SMS verification',          border: '#4CAF50' },
 ];
 
 // ────────────────────────────────────────────────────────────────
@@ -733,106 +714,7 @@ function OTPView({ goTo, run, loadingKey, authenticate, showError }) {
   );
 }
 
-// ────────────────────────────────────────────────────────────────
-//  PIN VIEW  (setup / confirm / verify)
-// ────────────────────────────────────────────────────────────────
-function PINView({ goTo, mode, authenticate, setupPin, showError, pin: savedPin }) {
-  const [entered,  setEntered]  = useState('');
-  const [firstPin, setFirstPin] = useState('');
-  const [step,     setStep]     = useState(mode); // 'setup' | 'confirm' | 'verify'
-  const [errMsg,   setErrMsg]   = useState('');
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-
-  const shake = () => {
-    Vibration.vibrate(300);
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 12,  duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -12, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 8,   duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0,   duration: 60, useNativeDriver: true }),
-    ]).start();
-  };
-
-  useEffect(() => {
-    if (entered.length === PIN_LENGTH) {
-      const t = setTimeout(() => process(entered), 80);
-      return () => clearTimeout(t);
-    }
-  }, [entered]);
-
-  const process = async (code) => {
-    setErrMsg('');
-    if (step === 'setup') {
-      setFirstPin(code);
-      setEntered('');
-      setStep('confirm');
-    } else if (step === 'confirm') {
-      if (code !== firstPin) {
-        setErrMsg("PINs don't match. Try again.");
-        shake(); setEntered(''); setFirstPin(''); setStep('setup');
-        return;
-      }
-      await setupPin(code);
-      Alert.alert('PIN Set! 🔒', 'Your PIN has been set successfully.', [
-        { text: 'Continue', onPress: () => authenticate('pin') },
-      ]);
-    } else if (step === 'verify') {
-      if (code === savedPin) {
-        await authenticate('pin');
-      } else {
-        setErrMsg('Incorrect PIN. Try again.');
-        shake(); setEntered('');
-      }
-    }
-  };
-
-  const pressKey = (k) => { if (entered.length < PIN_LENGTH) { setErrMsg(''); setEntered(p => p + k); } };
-  const backspace = () => { setErrMsg(''); setEntered(p => p.slice(0, -1)); };
-
-  const TITLES = { setup: 'Set Up PIN', confirm: 'Confirm PIN', verify: 'Enter Your PIN' };
-  const SUBS   = { setup: 'Choose a 4-digit PIN', confirm: 'Re-enter your PIN to confirm', verify: 'Enter your PIN to continue' };
-  const KEYS   = [['1','2','3'],['4','5','6'],['7','8','9'],['','0','⌫']];
-
-  return (
-    <View style={[S.formScroll, { alignItems: 'center' }]}>
-      <BackBtn onPress={() => goTo('home')} style={{ alignSelf: 'flex-start', width: '100%' }} />
-      <ViewHeader icon="🔒" title={TITLES[step]} sub={SUBS[step]} />
-
-      <Animated.View style={[S.pinDots, { transform: [{ translateX: shakeAnim }] }]}>
-        {Array.from({ length: PIN_LENGTH }).map((_, i) => (
-          <View key={i} style={[S.dot, i < entered.length && S.dotFilled]} />
-        ))}
-      </Animated.View>
-
-      {errMsg ? <Text style={{ color: C.danger, fontSize: 13, fontWeight: '600', marginBottom: 16 }}>{errMsg}</Text> : null}
-
-      <View style={S.keypad}>
-        {KEYS.map((row, ri) => (
-          <View key={ri} style={S.keyRow}>
-            {row.map((k, ki) =>
-              k === '' ? <View key={ki} style={S.keyEmpty} />
-              : k === '⌫' ? (
-                <TouchableOpacity key={ki} style={S.keyBtn} onPress={backspace} activeOpacity={0.5}>
-                  <Text style={{ fontSize: 20, color: C.textSub }}>⌫</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity key={ki} style={S.keyBtn} onPress={() => pressKey(k)} activeOpacity={0.5}>
-                  <Text style={{ fontSize: 26, fontWeight: '700', color: C.white }}>{k}</Text>
-                </TouchableOpacity>
-              )
-            )}
-          </View>
-        ))}
-      </View>
-
-      {step === 'verify' && (
-        <TouchableOpacity style={{ marginTop: 24 }} onPress={() => goTo('home')}>
-          <Text style={{ color: C.textSub, fontWeight: '600', fontSize: 13 }}>Forgot PIN? Sign in another way</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
+// PIN View removed — PIN setup/verify now handled by SecuritySetupScreen
 
 // ────────────────────────────────────────────────────────────────
 //  SHARED UI PRIMITIVES
@@ -996,14 +878,20 @@ const S = StyleSheet.create({
 
   // Home
   homeScroll: {
-    paddingTop: 56,
-    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingHorizontal: 22,
     paddingBottom: 40,
   },
-  brandWrap: { alignItems: 'center', marginBottom: 32 },
-  brandIcon: { fontSize: 56 },
-  brandName: { fontSize: 34, fontWeight: '900', color: C.white, marginTop: 6, letterSpacing: -0.5 },
-  brandTag:  { fontSize: 13, color: C.textSub, marginTop: 4, letterSpacing: 0.3 },
+  brandWrap: { alignItems: 'center', marginBottom: 36 },
+  brandIcon: { fontSize: 64 },
+  brandName: { fontSize: 38, fontWeight: '900', color: C.white, marginTop: 8, letterSpacing: -0.8 },
+  brandTag:  { fontSize: 14, color: C.textSub, marginTop: 6, letterSpacing: 0.3 },
+  trustBadge: {
+    marginTop: 14, backgroundColor: 'rgba(233,30,99,0.08)',
+    borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16,
+    borderWidth: 1, borderColor: 'rgba(233,30,99,0.15)',
+  },
+  trustText: { fontSize: 11, color: C.accent, fontWeight: '600', letterSpacing: 0.2 },
 
   // Social buttons
   googleBtn: {
@@ -1032,11 +920,14 @@ const S = StyleSheet.create({
   divLine2:     { flex: 1, height: 1, backgroundColor: C.border },
   divLabel:     { color: C.textHint, fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginHorizontal: 12 },
 
-  // Auth cards scroll
-  cardScroll:  { paddingVertical: 4, gap: 12 },
+  // Auth method card grid
+  cardGrid: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    gap: 10, marginBottom: 24,
+  },
   authCard: {
-    width: 120, borderRadius: 20, padding: 16,
-    alignItems: 'center', minHeight: 130,
+    flex: 1, borderRadius: 20, padding: 16,
+    alignItems: 'center', minHeight: 120,
     backgroundColor: C.card,
     borderWidth: 1.5, elevation: 4,
   },
@@ -1044,26 +935,22 @@ const S = StyleSheet.create({
   cardLabel: { fontSize: 13, fontWeight: '800', color: C.white, textAlign: 'center' },
   cardSub:   { fontSize: 9,  color: C.textSub, textAlign: 'center', marginTop: 4, lineHeight: 13 },
 
-  // Bottom row
-  bottomRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  pinBtn: {
-    flex: 1.1, backgroundColor: '#2D0E1A', borderRadius: 16,
-    paddingVertical: 14, alignItems: 'center',
-    borderWidth: 1.5, borderColor: C.primary, elevation: 3,
-  },
+  // Bottom actions
+  bottomActions: { gap: 12, marginBottom: 24 },
   createBtn: {
-    flex: 1.5, backgroundColor: C.primary, borderRadius: 16,
-    paddingVertical: 14, alignItems: 'center', elevation: 5,
+    backgroundColor: C.primary, borderRadius: 16,
+    paddingVertical: 16, alignItems: 'center', elevation: 6,
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 12,
   },
   quickBtn: {
-    flex: 1, borderRadius: 16, paddingVertical: 14,
+    borderRadius: 16, paddingVertical: 14,
     alignItems: 'center', borderWidth: 1.5, borderColor: C.border,
     backgroundColor: C.surface,
   },
-  bottomIcon:  { fontSize: 20 },
-  bottomLabel: { color: C.white, fontSize: 11, fontWeight: '800', marginTop: 4 },
 
-  footerNote: { textAlign: 'center', color: C.textHint, fontSize: 11, marginTop: 8 },
+  footerWrap: { alignItems: 'center', paddingBottom: 16 },
+  footerNote: { textAlign: 'center', color: C.textHint, fontSize: 11 },
 
   // Toast
   toast: {
@@ -1146,20 +1033,6 @@ const S = StyleSheet.create({
     fontWeight: '900', color: C.white, backgroundColor: C.surface,
   },
 
-  // PIN pad
-  pinDots:  { flexDirection: 'row', gap: 20, marginVertical: 32 },
-  dot:      { width: 18, height: 18, borderRadius: 9, borderWidth: 2.5, borderColor: C.primary, backgroundColor: 'transparent' },
-  dotFilled:{ backgroundColor: C.primary },
-  keypad:   { width: '100%', maxWidth: 280, marginTop: 8 },
-  keyRow:   { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  keyBtn: {
-    width: 78, height: 78, borderRadius: 39,
-    backgroundColor: C.card, alignItems: 'center', justifyContent: 'center',
-    elevation: 4,
-    shadowColor: C.primary, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15, shadowRadius: 6,
-    borderWidth: 1, borderColor: C.border,
-  },
-  keyEmpty: { width: 78, height: 78 },
+  // PIN pad (removed — now in SecuritySetupScreen)
 });
 
