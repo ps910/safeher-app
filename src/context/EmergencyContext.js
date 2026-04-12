@@ -23,6 +23,9 @@ import BackgroundLocationService from '../services/BackgroundLocationService';
 import NotificationService from '../services/NotificationService';
 import LiveLocationSharingService from '../services/LiveLocationSharingService';
 import EncryptedStorageService from '../services/EncryptedStorageService';
+import { EvidenceDB } from '../services/Database';
+import * as FileSystem from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
 
 const EmergencyContext = createContext();
 
@@ -483,6 +486,38 @@ export const EmergencyProvider = ({ children }) => {
       console.log('[SOS] AI services activated:', aiResult);
       if (aiResult.siren) setSirenActive(true);
       if (aiResult.recording) setIsRecording(true);
+
+      // Save captured SOS photo to Evidence Vault
+      if (aiResult.photo) {
+        try {
+          const capturedPhotos = SafetyAIService.capturedPhotos || [];
+          for (const photoUri of capturedPhotos) {
+            const fileInfo = await FileSystem.getInfoAsync(photoUri);
+            if (fileInfo.exists) {
+              const hash = await Crypto.digestStringAsync(
+                Crypto.CryptoDigestAlgorithm.SHA256,
+                `${photoUri}-${fileInfo.size}-${Date.now()}`
+              );
+              await EvidenceDB.add({
+                type: 'photo',
+                uri: photoUri,
+                size: fileInfo.size,
+                description: `SOS auto-captured photo at ${new Date().toLocaleString()}`,
+                fileHash: hash,
+              });
+              await EvidenceDB.addFile({
+                type: 'photo',
+                uri: photoUri,
+                size: fileInfo.size,
+                mimeType: 'image/jpeg',
+              });
+              console.log('[SOS] Photo evidence saved to vault:', photoUri);
+            }
+          }
+        } catch (photoErr) {
+          console.error('[SOS] Error saving photo evidence:', photoErr);
+        }
+      }
     } catch (e) {
       console.error('[SOS] AI services activation error:', e);
     }
@@ -514,6 +549,40 @@ export const EmergencyProvider = ({ children }) => {
     try {
       const aiResult = await SafetyAIService.deactivateSOSServices();
       console.log('[SOS] AI services deactivated:', aiResult);
+
+      // Save recorded SOS audio evidence to Evidence Vault
+      if (aiResult.evidenceUri) {
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(aiResult.evidenceUri);
+          if (fileInfo.exists) {
+            const hash = await Crypto.digestStringAsync(
+              Crypto.CryptoDigestAlgorithm.SHA256,
+              `${aiResult.evidenceUri}-${fileInfo.size}-${Date.now()}`
+            );
+            await EvidenceDB.add({
+              type: 'audio',
+              uri: aiResult.evidenceUri,
+              size: fileInfo.size,
+              description: `SOS audio recording at ${new Date().toLocaleString()}`,
+              fileHash: hash,
+            });
+            await EvidenceDB.addFile({
+              type: 'audio',
+              uri: aiResult.evidenceUri,
+              size: fileInfo.size,
+              mimeType: 'audio/m4a',
+            });
+            console.log('[SOS] Audio evidence saved to vault:', aiResult.evidenceUri);
+          }
+        } catch (audioErr) {
+          console.error('[SOS] Error saving audio evidence:', audioErr);
+        }
+      }
+
+      // Save any remaining captured photos that weren't saved during trigger
+      if (aiResult.photosCaptured > 0) {
+        console.log(`[SOS] ${aiResult.photosCaptured} photos were captured during SOS`);
+      }
     } catch (e) {
       console.error('[SOS] AI deactivation error:', e);
     }

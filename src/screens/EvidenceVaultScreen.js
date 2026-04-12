@@ -836,12 +836,26 @@ export default function EvidenceVaultScreen({ navigation }) {
     return `${days}d ago`;
   };
 
+  // ─── Helper: detect effective media type for SOS items with URIs ──
+  const getEffectiveMediaType = (item) => {
+    if (!item) return item?.type || 'text';
+    if (item.type !== 'sos' || !item.uri) return item.type;
+    const ext = (item.uri.split('.').pop() || '').toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'photo';
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return 'video';
+    if (['m4a', 'mp3', 'wav', 'aac', 'ogg', 'caf'].includes(ext)) return 'audio';
+    return item.type;
+  };
+
   // ─── Render Evidence Item ─────────────────────────────────────
   const renderEvidenceItem = ({ item, index }) => {
     const typeInfo = EVIDENCE_TYPES[item.type] || EVIDENCE_TYPES.text;
-    const isAudio = item.type === 'audio' && item.uri;
-    const isPhoto = item.type === 'photo' && item.uri;
-    const isVideo = item.type === 'video' && item.uri;
+
+    const effectiveType = getEffectiveMediaType(item);
+
+    const isAudio = (effectiveType === 'audio') && item.uri;
+    const isPhoto = (effectiveType === 'photo') && item.uri;
+    const isVideo = (effectiveType === 'video') && item.uri;
     const isCurrentlyPlaying = playingId === item.id;
     const isMediaItem = isPhoto || isVideo;
 
@@ -1221,6 +1235,7 @@ export default function EvidenceVaultScreen({ navigation }) {
           <View style={styles.detailContent}>
             {selectedItem && (() => {
               const typeInfo = EVIDENCE_TYPES[selectedItem.type] || EVIDENCE_TYPES.text;
+              const effectiveType = getEffectiveMediaType(selectedItem);
               return (
                 <ScrollView showsVerticalScrollIndicator={false}>
                   {/* Detail Header */}
@@ -1243,7 +1258,7 @@ export default function EvidenceVaultScreen({ navigation }) {
                   </View>
 
                   {/* Photo Preview */}
-                  {selectedItem.type === 'photo' && selectedItem.uri && (
+                  {effectiveType === 'photo' && selectedItem.uri && (
                     <View style={styles.detailSection}>
                       <Text style={styles.detailSectionTitle}>Photo</Text>
                       <TouchableOpacity
@@ -1267,7 +1282,7 @@ export default function EvidenceVaultScreen({ navigation }) {
                   )}
 
                   {/* Video Preview */}
-                  {selectedItem.type === 'video' && selectedItem.uri && (
+                  {effectiveType === 'video' && selectedItem.uri && (
                     <View style={styles.detailSection}>
                       <Text style={styles.detailSectionTitle}>Video</Text>
                       <TouchableOpacity
@@ -1288,7 +1303,7 @@ export default function EvidenceVaultScreen({ navigation }) {
                   )}
 
                   {/* Audio Player (for audio evidence) */}
-                  {selectedItem.type === 'audio' && selectedItem.uri && (
+                  {effectiveType === 'audio' && selectedItem.uri && (
                     <View style={styles.detailSection}>
                       <Text style={styles.detailSectionTitle}>Audio Playback</Text>
                       <View style={styles.audioPlayerCard}>
@@ -1455,10 +1470,12 @@ export default function EvidenceVaultScreen({ navigation }) {
           </TouchableOpacity>
 
           {/* Content */}
-          {mediaViewerItem && (
+          {mediaViewerItem && (() => {
+            const effectiveMVType = getEffectiveMediaType(mediaViewerItem);
+            return (
             <View style={styles.mediaViewerContent}>
               {/* Photo */}
-              {mediaViewerItem.type === 'photo' && (
+              {effectiveMVType === 'photo' && (
                 <Image
                   source={{ uri: mediaViewerItem.uri }}
                   style={styles.mediaViewerImage}
@@ -1467,7 +1484,7 @@ export default function EvidenceVaultScreen({ navigation }) {
               )}
 
               {/* Video */}
-              {mediaViewerItem.type === 'video' && (
+              {effectiveMVType === 'video' && (
                 <Video
                   ref={videoRef}
                   source={{ uri: mediaViewerItem.uri }}
@@ -1480,7 +1497,7 @@ export default function EvidenceVaultScreen({ navigation }) {
               )}
 
               {/* Audio (fullscreen player) */}
-              {mediaViewerItem.type === 'audio' && (
+              {effectiveMVType === 'audio' && (
                 <View style={styles.mediaViewerAudio}>
                   <Ionicons name="musical-notes" size={80} color={COLORS.primary} />
                   <Text style={styles.mediaViewerAudioTitle} numberOfLines={2}>
@@ -1515,7 +1532,8 @@ export default function EvidenceVaultScreen({ navigation }) {
                 </View>
               )}
             </View>
-          )}
+            );
+          })()}
 
           {/* Bottom actions */}
           {mediaViewerItem && (

@@ -290,34 +290,65 @@ class SafetyAIServiceClass {
         shouldDuckAndroid: false,
       });
 
-      // Generate a simple alarm tone using a WAV buffer
-      const sirenUri = await this._generateAlarmTone();
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: sirenUri },
-        {
-          shouldPlay: true,
-          isLooping: true,
-          volume: 1.0,
-          rate: 1.0,
+      // Strategy 1: Try loading a real alarm sound from a reliable remote URL
+      let sound = null;
+      const ALARM_URLS = [
+        'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+        'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+        'https://actions.google.com/sounds/v1/emergency/emergency_siren.ogg',
+      ];
+
+      for (const url of ALARM_URLS) {
+        try {
+          const result = await Audio.Sound.createAsync(
+            { uri: url },
+            { shouldPlay: true, isLooping: true, volume: 1.0 },
+            null,
+            false
+          );
+          sound = result.sound;
+          console.log('[Siren] Remote alarm loaded:', url);
+          break;
+        } catch (urlErr) {
+          console.log('[Siren] URL failed, trying next:', url);
         }
-      );
+      }
 
-      this.sirenSound = sound;
-      this.isSirenPlaying = true;
-      this.serviceStatus.siren = 'playing';
+      // Strategy 2: Generate local WAV siren if remote fails
+      if (!sound) {
+        console.log('[Siren] Remote failed, generating local WAV siren...');
+        try {
+          const sirenUri = await this._generateSirenWAV();
+          const result = await Audio.Sound.createAsync(
+            { uri: sirenUri },
+            { shouldPlay: true, isLooping: true, volume: 1.0 }
+          );
+          sound = result.sound;
+          console.log('[Siren] Local WAV siren loaded');
+        } catch (wavErr) {
+          console.error('[Siren] Local WAV generation failed:', wavErr);
+        }
+      }
 
-      // Also start strong vibration pattern
-      Vibration.vibrate([0, 500, 200, 500, 200, 500, 200, 500, 200, 500], true);
+      if (sound) {
+        this.sirenSound = sound;
+        this.isSirenPlaying = true;
+        this.serviceStatus.siren = 'playing';
+        // Also vibrate
+        Vibration.vibrate([0, 500, 200, 500, 200, 500, 200, 500, 200, 500], true);
+        console.log('[Siren] Emergency siren activated!');
+        this._notify({ type: 'siren_started', timestamp: new Date().toISOString() });
+        return true;
+      }
 
-      console.log('[Siren] 🔊 Emergency siren activated!');
-      this._notify({ type: 'siren_started', timestamp: new Date().toISOString() });
-      return true;
+      // Strategy 3: Last resort — vibrate only
+      throw new Error('No audio source available');
     } catch (e) {
-      console.error('[Siren] Start error:', e);
-      // Fallback: just vibrate aggressively
+      console.error('[Siren] All audio strategies failed:', e);
       Vibration.vibrate([0, 1000, 200, 1000, 200, 1000], true);
       this.isSirenPlaying = true;
       this.serviceStatus.siren = 'vibration_only';
+      this._notify({ type: 'siren_started', timestamp: new Date().toISOString() });
       return true;
     }
   }
@@ -337,95 +368,98 @@ class SafetyAIServiceClass {
     this._notify({ type: 'siren_stopped' });
   }
 
-  // Generate a simple alarm WAV tone (PCM sine wave)
-  async _generateAlarmTone() {
-    try {
-      const sampleRate = 22050;
-      const durationSec = 2; // 2-second loop
-      const numSamples = sampleRate * durationSec;
-      const bytesPerSample = 2; // 16-bit
-      const dataSize = numSamples * bytesPerSample;
+  /**
+   * Generate a WAV siren tone using plain JS arrays (Hermes-compatible).
+   * Produces a loud ascending/descending siren between 600–1500 Hz.
+   */
+  async _generateSirenWAV() {
+    const sampleRate = 22050;
+    const durationSec = 4;
+    const numSamples = sampleRate * durationSec;
+    const bytesPerSample = 2;
+    const dataSize = numSamples * bytesPerSample;
+    const fileSize = 44 + dataSize;
 
-      // WAV header (44 bytes)
-      const header = new ArrayBuffer(44);
-      const view = new DataView(header);
+    // Build entire WAV as a plain byte array
+    const wav = new Array(fileSize);
 
-      // RIFF header
-      this._writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + dataSize, true);
-      this._writeString(view, 8, 'WAVE');
+    // Helper: write a string at offset
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) wav[offset + i] = str.charCodeAt(i);
+    };
+    // Helper: write 32-bit little-endian uint
+    const writeU32 = (offset, val) => {
+      wav[offset]     = val & 0xFF;
+      wav[offset + 1] = (val >> 8) & 0xFF;
+      wav[offset + 2] = (val >> 16) & 0xFF;
+      wav[offset + 3] = (val >> 24) & 0xFF;
+    };
+    // Helper: write 16-bit little-endian uint
+    const writeU16 = (offset, val) => {
+      wav[offset]     = val & 0xFF;
+      wav[offset + 1] = (val >> 8) & 0xFF;
+    };
 
-      // fmt chunk
-      this._writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true); // PCM
-      view.setUint16(22, 1, true); // mono
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * bytesPerSample, true);
-      view.setUint16(32, bytesPerSample, true);
-      view.setUint16(34, 16, true); // bits per sample
+    // WAV header (44 bytes)
+    writeStr(0, 'RIFF');
+    writeU32(4, 36 + dataSize);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    writeU32(16, 16);             // chunk size
+    writeU16(20, 1);              // PCM format
+    writeU16(22, 1);              // mono
+    writeU32(24, sampleRate);     // sample rate
+    writeU32(28, sampleRate * bytesPerSample); // byte rate
+    writeU16(32, bytesPerSample); // block align
+    writeU16(34, 16);             // bits per sample
+    writeStr(36, 'data');
+    writeU32(40, dataSize);
 
-      // data chunk
-      this._writeString(view, 36, 'data');
-      view.setUint32(40, dataSize, true);
+    // Generate siren samples — loud ascending/descending sweep
+    let offset = 44;
+    let phase = 0;
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      // Siren sweeps: 0.7s up, 0.7s down
+      const cyclePos = (t % 1.4) / 1.4;
+      const freq = cyclePos < 0.5
+        ? 600 + cyclePos * 2 * 900     // 600 → 1500 Hz
+        : 1500 - (cyclePos - 0.5) * 2 * 900; // 1500 → 600 Hz
 
-      // Generate alternating frequency siren (ascending/descending)
-      const samples = new Int16Array(numSamples);
-      for (let i = 0; i < numSamples; i++) {
-        const t = i / sampleRate;
-        // Siren: oscillate between 800Hz and 1400Hz over 1 second
-        const phase = (t % 1.0);
-        const freq = phase < 0.5
-          ? 800 + (phase * 2) * 600   // Rise: 800 → 1400 Hz
-          : 1400 - ((phase - 0.5) * 2) * 600; // Fall: 1400 → 800 Hz
-        const value = Math.sin(2 * Math.PI * freq * t) * 0.95;
-        samples[i] = Math.round(value * 32767);
-      }
+      phase += (2 * Math.PI * freq) / sampleRate;
+      if (phase > 2 * Math.PI) phase -= 2 * Math.PI;
 
-      // Combine header + data into base64
-      const headerBytes = new Uint8Array(header);
-      const dataBytes = new Uint8Array(samples.buffer);
-      const combined = new Uint8Array(headerBytes.length + dataBytes.length);
-      combined.set(headerBytes, 0);
-      combined.set(dataBytes, headerBytes.length);
+      // Full-volume sine wave
+      const sample = Math.sin(phase) * 0.95;
+      const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
 
-      // Convert to base64 manually
-      const base64 = this._uint8ToBase64(combined);
-
-      // Write to file
-      const fileUri = FileSystem.documentDirectory + 'siren_alarm.wav';
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      return fileUri;
-    } catch (e) {
-      console.error('[Siren] Tone generation error:', e);
-      throw e;
+      // Write 16-bit signed LE
+      const unsigned = intSample < 0 ? intSample + 65536 : intSample;
+      wav[offset]     = unsigned & 0xFF;
+      wav[offset + 1] = (unsigned >> 8) & 0xFF;
+      offset += 2;
     }
-  }
 
-  _writeString(view, offset, str) {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i));
+    // Convert byte array to base64 — Hermes-safe chunked encoder
+    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let b64 = '';
+    for (let i = 0; i < wav.length; i += 3) {
+      const a = wav[i];
+      const b = i + 1 < wav.length ? wav[i + 1] : 0;
+      const c = i + 2 < wav.length ? wav[i + 2] : 0;
+      b64 += B64[(a >> 2) & 0x3F];
+      b64 += B64[((a & 3) << 4) | ((b >> 4) & 0xF)];
+      b64 += i + 1 < wav.length ? B64[((b & 0xF) << 2) | ((c >> 6) & 3)] : '=';
+      b64 += i + 2 < wav.length ? B64[c & 0x3F] : '=';
     }
-  }
 
-  _uint8ToBase64(uint8) {
-    // React Native compatible base64 encoder (no btoa dependency)
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let result = '';
-    const len = uint8.length;
-    for (let i = 0; i < len; i += 3) {
-      const a = uint8[i];
-      const b = i + 1 < len ? uint8[i + 1] : 0;
-      const c = i + 2 < len ? uint8[i + 2] : 0;
-      result += chars[(a >> 2) & 0x3f];
-      result += chars[((a & 3) << 4) | ((b >> 4) & 0xf)];
-      result += i + 1 < len ? chars[((b & 0xf) << 2) | ((c >> 6) & 3)] : '=';
-      result += i + 2 < len ? chars[c & 0x3f] : '=';
-    }
-    return result;
+    // Write to file
+    const fileUri = FileSystem.documentDirectory + 'sos_siren.wav';
+    await FileSystem.writeAsStringAsync(fileUri, b64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    return fileUri;
   }
 
   // ═══════════════════════════════════════════════════════════════

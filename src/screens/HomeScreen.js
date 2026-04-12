@@ -733,12 +733,14 @@ const styles = StyleSheet.create({
 
   // ── Header ──
   header: {
-    backgroundColor: COLORS.primaryDark,
+    backgroundColor: COLORS.card, // Upgraded to card for dark glass feel
     paddingTop: Platform.OS === 'ios' ? 56 : 40,
-    paddingBottom: 24,
+    paddingBottom: 28, // slight more padding
     paddingHorizontal: 20,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
     ...SHADOWS.large,
   },
   headerInner: {
@@ -746,10 +748,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appTitle: {
-    fontSize: 28, fontWeight: '900', color: '#FFF', letterSpacing: 0.8,
+    fontSize: 32, fontWeight: '900', color: COLORS.primary, letterSpacing: -0.5,
   },
   appSubtitle: {
-    fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: '500',
+    fontSize: 13, color: COLORS.textSecondary, marginTop: 4, fontWeight: '600', letterSpacing: 0.5,
   },
   settingsBtn: { padding: 4 },
   settingsIcon: {
@@ -778,23 +780,25 @@ const styles = StyleSheet.create({
 
   // ── Status Card ──
   statusCard: {
-    marginHorizontal: 16, marginTop: 14, padding: 18, borderRadius: 20,
-    backgroundColor: '#fff', ...SHADOWS.medium, borderWidth: 1, borderColor: COLORS.border,
+    marginHorizontal: 16, marginTop: 14, padding: 20, borderRadius: 24,
+    backgroundColor: COLORS.card, ...SHADOWS.medium, 
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  statusCardDanger: { borderColor: '#FF1744', borderWidth: 2, backgroundColor: '#FFF5F5' },
+  statusCardDanger: { borderColor: COLORS.danger, borderWidth: 1.5, backgroundColor: 'rgba(255,23,68,0.05)' },
   statusRow: { flexDirection: 'row', alignItems: 'center' },
   statusIconWrap: {
-    width: 44, height: 44, borderRadius: 14,
-    backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center',
+    width: 48, height: 48, borderRadius: 16,
+    backgroundColor: 'rgba(0,200,83,0.1)', justifyContent: 'center', alignItems: 'center',
   },
-  statusTitle: { fontSize: 16, fontWeight: '800', color: '#00C853', letterSpacing: 0.3 },
-  statusSub: { fontSize: 12, color: COLORS.textSecondary, marginTop: 3 },
-  featurePills: { flexDirection: 'row', marginTop: 14, flexWrap: 'wrap', gap: 6 },
+  statusTitle: { fontSize: 17, fontWeight: '800', color: COLORS.success, letterSpacing: 0.3 },
+  statusSub: { fontSize: 12, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
+  featurePills: { flexDirection: 'row', marginTop: 16, flexWrap: 'wrap', gap: 8 },
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.primary + '08', borderRadius: 20,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1, borderColor: COLORS.primary + '15',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: COLORS.surface, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: COLORS.border,
+    ...SHADOWS.small,
   },
   pillActive: { backgroundColor: '#00C85310', borderColor: '#00C85330' },
   pillText: { fontSize: 10, fontWeight: '700', color: COLORS.primary },
@@ -828,30 +832,32 @@ const styles = StyleSheet.create({
   // ── SOS ──
   sosWrapper: {
     alignItems: 'center', justifyContent: 'center',
-    marginVertical: 28, height: 200,
+    marginVertical: 36, height: 220,
   },
   sosRing: {
-    position: 'absolute', width: 160, height: 160, borderRadius: 80,
-    borderWidth: 3, borderColor: '#FF1744',
+    position: 'absolute', width: 170, height: 170, borderRadius: 85,
+    borderWidth: 2, borderColor: '#FF2A70',
+    backgroundColor: 'rgba(255,42,112,0.15)',
   },
   sosButton: {
-    width: 156, height: 156, borderRadius: 78,
-    backgroundColor: '#FF1744', alignItems: 'center', justifyContent: 'center',
-    elevation: 20, shadowColor: '#FF1744', shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5, shadowRadius: 20,
-    borderWidth: 5, borderColor: 'rgba(255,23,68,0.25)',
+    width: 164, height: 164, borderRadius: 82,
+    backgroundColor: '#FF2A70', alignItems: 'center', justifyContent: 'center',
+    elevation: 24, shadowColor: '#FF2A70', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8, shadowRadius: 30, // massive glowing shadow
+    borderWidth: 6, borderColor: 'rgba(255,255,255,0.2)', // sleek inset ring
   },
-  sosText: { fontSize: 34, fontWeight: '900', color: '#FFF', marginTop: 2, letterSpacing: 3 },
-  sosSubText: { fontSize: 9, color: 'rgba(255,255,255,0.7)', marginTop: 3 },
+  sosText: { fontSize: 38, fontWeight: '900', color: '#FFF', marginTop: 2, letterSpacing: 4 },
+  sosSubText: { fontSize: 10, color: 'rgba(255,255,255,0.85)', marginTop: 4, fontWeight: '600' },
 
-  countdownContainer: { alignItems: 'center', marginVertical: 28 },
-  countdownLabel: { fontSize: 14, fontWeight: '800', color: '#FF6D00', letterSpacing: 1 },
+  countdownContainer: { alignItems: 'center', marginVertical: 36 },
+  countdownLabel: { fontSize: 15, fontWeight: '800', color: '#FF8F00', letterSpacing: 2 },
   countdownCircle: {
-    width: 120, height: 120, borderRadius: 60,
-    borderWidth: 4, borderColor: '#FF1744', justifyContent: 'center', alignItems: 'center',
-    marginVertical: 16,
+    width: 130, height: 130, borderRadius: 65,
+    borderWidth: 5, borderColor: '#FF2A70', justifyContent: 'center', alignItems: 'center',
+    marginVertical: 20,
+    elevation: 10, shadowColor: '#FF2A70', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 15,
   },
-  countdownNumber: { fontSize: 56, fontWeight: '900', color: '#FF1744' },
+  countdownNumber: { fontSize: 60, fontWeight: '900', color: '#FF2A70' },
   cancelBtn: {
     backgroundColor: '#fff', borderRadius: 30, paddingHorizontal: 36, paddingVertical: 13,
     borderWidth: 2, borderColor: '#FF1744', ...SHADOWS.small,
@@ -898,17 +904,17 @@ const styles = StyleSheet.create({
     gap: 10, justifyContent: 'space-between',
   },
   quickCard: {
-    width: (SCREEN_W - 54) / 3, alignItems: 'center', paddingVertical: 16, paddingHorizontal: 6,
-    backgroundColor: '#fff', borderRadius: 18, ...SHADOWS.small,
+    width: (SCREEN_W - 54) / 3, alignItems: 'center', paddingVertical: 18, paddingHorizontal: 6,
+    backgroundColor: COLORS.surface, borderRadius: 22, ...SHADOWS.small,
     borderWidth: 1, borderColor: COLORS.border,
   },
   quickIcon: {
-    width: 50, height: 50, borderRadius: 16,
+    width: 54, height: 54, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
   },
   quickLabel: {
-    fontSize: 11, fontWeight: '600', color: COLORS.text,
-    marginTop: 10, textAlign: 'center', lineHeight: 15,
+    fontSize: 12, fontWeight: '700', color: COLORS.text,
+    marginTop: 10, textAlign: 'center', lineHeight: 16,
   },
 
   // ── Helplines ──

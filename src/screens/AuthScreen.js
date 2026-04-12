@@ -63,21 +63,21 @@ WebBrowser.maybeCompleteAuthSession();
 //  DESIGN TOKENS — Dark Luxury
 // ────────────────────────────────────────────────────────────────
 const C = {
-  bg:           '#0D0D14',
-  surface:      '#13131F',
-  card:         '#1A1A2A',
-  border:       'rgba(255,255,255,0.08)',
-  borderGlow:   'rgba(233,30,99,0.5)',
-  primary:      '#E91E63',
-  primaryDark:  '#C2185B',
-  primaryGlow:  'rgba(233,30,99,0.25)',
-  accent:       '#FF6B9D',
+  bg:           '#07070B', // Deepest black
+  surface:      'rgba(255,255,255,0.03)', // Glass surface
+  card:         'rgba(30,30,42,0.6)', // Glass card
+  border:       'rgba(255,255,255,0.06)', // Subtle border
+  borderGlow:   'rgba(255,42,112,0.8)', // Primary glow border
+  primary:      '#FF2A70', // Vibrant pink
+  primaryDark:  '#D81B60', // Darker pink
+  primaryGlow:  'rgba(255,42,112,0.3)', // Glow drop shadow
+  accent:       '#FF8FAB', // Soft accent
   gold:         '#FFB300',
   white:        '#FFFFFF',
   text:         '#F0F0F8',
-  textSub:      '#8888AA',
-  textHint:     '#555570',
-  danger:       '#FF5252',
+  textSub:      '#8B8C9E',
+  textHint:     '#5C5D72',
+  danger:       '#FF1744',
   success:      '#00E676',
   google:       '#DB4437',
   facebook:     '#1877F2',
@@ -137,7 +137,12 @@ function FloatingOrb({ size, color, startX, startY, duration }) {
         borderRadius: size / 2,
         backgroundColor: color,
         transform: [{ translateX: x }, { translateY: y }],
-        opacity: 0.18,
+        opacity: 0.25, // Increased opacity for better glow
+        shadowColor: color, // Added pure glow
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 1,
+        shadowRadius: size / 3,
+        elevation: 10,
       }}
     />
   );
@@ -976,10 +981,12 @@ const S = StyleSheet.create({
     gap: 12, marginBottom: 28,
   },
   authCard: {
-    flex: 1, borderRadius: 22, paddingVertical: 20, paddingHorizontal: 12,
-    alignItems: 'center', minHeight: 140,
+    flex: 1, borderRadius: 24, paddingVertical: 22, paddingHorizontal: 12, // More padding, rounder
+    alignItems: 'center', minHeight: 145,
     backgroundColor: C.card,
-    borderWidth: 1.5, elevation: 6,
+    borderWidth: 1, elevation: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5, shadowRadius: 16,
   },
   cardIconBg: {
     width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
@@ -996,10 +1003,10 @@ const S = StyleSheet.create({
     borderRadius: 20, backgroundColor: C.primaryGlow,
   },
   createBtn: {
-    backgroundColor: C.primary, borderRadius: 16,
-    paddingVertical: 18, alignItems: 'center', elevation: 8,
-    shadowColor: C.primary, shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5, shadowRadius: 16,
+    backgroundColor: C.primary, borderRadius: 20, // softer radius
+    paddingVertical: 18, alignItems: 'center', elevation: 12,
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5, shadowRadius: 20, // glowing shadow
   },
   createBtnText: { fontSize: 17, fontWeight: '900', color: C.white, letterSpacing: 0.3 },
   quickBtn: {
@@ -1035,8 +1042,9 @@ const S = StyleSheet.create({
 
   // Glass input
   inputWrap: {
-    borderRadius: 14, borderWidth: 1.5,
+    borderRadius: 16, borderWidth: 1,
     backgroundColor: C.surface,
+    backdropFilter: 'blur(10px)', // Will work gracefully fallback in RN
     overflow: 'hidden',
   },
   input: {
@@ -1051,15 +1059,16 @@ const S = StyleSheet.create({
 
   // Primary button
   primaryBtn: {
-    backgroundColor: C.primary, borderRadius: 16,
-    paddingVertical: 16, alignItems: 'center',
+    backgroundColor: C.primary, borderRadius: 20,
+    paddingVertical: 18, alignItems: 'center',
     elevation: 8,
-    shadowColor: C.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5, shadowRadius: 12,
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6, shadowRadius: 20,
   },
   outlineBtn: {
-    borderWidth: 2, borderColor: C.primary, borderRadius: 16,
-    paddingVertical: 14, alignItems: 'center',
+    borderWidth: 1.5, borderColor: C.primary, borderRadius: 20,
+    backgroundColor: 'rgba(255,42,112,0.05)', // slight fill for glass look
+    paddingVertical: 16, alignItems: 'center',
   },
 
   // Divider (forms)

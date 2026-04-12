@@ -1,6 +1,6 @@
 /**
- * Fake Call Screen — Ultra-realistic phone call simulation
- * Designed to be indistinguishable from a native incoming/active call
+ * FakeCallScreen — Pixel-perfect replica of Android/Google Phone incoming call
+ * Looks identical to the native stock dialer — no emojis, no branding
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -23,19 +23,19 @@ import {
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
-import { useTheme } from '../constants/theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
-// ── Preset callers with realistic Indian numbers ──
+// ── Preset callers — realistic names, no emojis ──
 const PRESET_CALLERS = [
-  { id: '1', name: 'Mom', emoji: '❤️', number: '+91 98765 43210', label: 'Mobile' },
-  { id: '2', name: 'Dad', emoji: '👨', number: '+91 87654 32109', label: 'Mobile' },
-  { id: '3', name: 'Sister', emoji: '👧', number: '+91 76543 21098', label: 'Mobile' },
-  { id: '4', name: 'Best Friend', emoji: '💜', number: '+91 65432 10987', label: 'Mobile' },
-  { id: '5', name: 'Boss', emoji: '💼', number: '+91 54321 09876', label: 'Work' },
-  { id: '6', name: 'Brother', emoji: '👦', number: '+91 99887 76655', label: 'Mobile' },
+  { id: '1', name: 'Mom', number: '+91 98765 43210', label: 'Mobile' },
+  { id: '2', name: 'Dad', number: '+91 87654 32109', label: 'Mobile' },
+  { id: '3', name: 'Priya', number: '+91 76543 21098', label: 'Mobile' },
+  { id: '4', name: 'Rahul', number: '+91 65432 10987', label: 'Mobile' },
+  { id: '5', name: 'Office', number: '+91 54321 09876', label: 'Work' },
+  { id: '6', name: 'Ananya', number: '+91 99887 76655', label: 'Mobile' },
 ];
 
 const DELAY_OPTIONS = [
@@ -49,8 +49,21 @@ const DELAY_OPTIONS = [
   { label: '5 min', value: 300 },
 ];
 
+// Avatar background colors — Google Contacts style
+const AVATAR_COLORS = [
+  '#1A73E8', '#E8710A', '#D93025', '#188038',
+  '#A142F4', '#E37400', '#5F6368', '#1967D2',
+];
+
+const getAvatarColor = (name) => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+};
+
 const FakeCallScreen = ({ navigation }) => {
-  const { colors: themeColors, isDark } = useTheme();
   // ── State ──
   const [selectedCaller, setSelectedCaller] = useState(PRESET_CALLERS[0]);
   const [selectedDelay, setSelectedDelay] = useState(0);
@@ -69,36 +82,36 @@ const FakeCallScreen = ({ navigation }) => {
   const [dtmfDigits, setDtmfDigits] = useState('');
   const [callConnecting, setCallConnecting] = useState(false);
 
-  // Ringtone audio
+  // Ringtone
   const ringtoneRef = useRef(null);
-  const ringLoopRef = useRef(null);
 
   // Animations
-  const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const ringPulse1 = useRef(new Animated.Value(0)).current;
   const ringPulse2 = useRef(new Animated.Value(0)).current;
   const ringPulse3 = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const swipeX = useRef(new Animated.Value(0)).current;
+  const breatheAnim = useRef(new Animated.Value(0)).current;
 
   const pulseAnimRef = useRef(null);
   const ringAnimRef = useRef(null);
+  const breatheAnimRef = useRef(null);
 
-  // Swipe-to-answer threshold
   const SWIPE_THRESHOLD = SCREEN_W * 0.35;
 
-  // ── Cleanup on unmount ──
+  // ── Cleanup ──
   useEffect(() => {
     return () => {
       Vibration.cancel();
       stopRingtone();
       if (pulseAnimRef.current) pulseAnimRef.current.stop();
       if (ringAnimRef.current) ringAnimRef.current.stop();
+      if (breatheAnimRef.current) breatheAnimRef.current.stop();
     };
   }, []);
 
-  // ── Ringtone audio playback ──
+  // ── Ringtone ──
   const playRingtone = async () => {
     try {
       await Audio.setAudioModeAsync({
@@ -107,17 +120,13 @@ const FakeCallScreen = ({ navigation }) => {
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
       });
-      // Generate a realistic ring pattern using 440Hz + 480Hz (standard US ring)
-      // Since we can't easily generate tones, we use the built-in vibration pattern
-      // and set maximum volume ring simulation
       const { sound } = await Audio.Sound.createAsync(
         { uri: 'https://actions.google.com/sounds/v1/telephones/phone_ringing.ogg' },
         { isLooping: true, volume: 1.0, shouldPlay: true }
       );
       ringtoneRef.current = sound;
     } catch (e) {
-      console.log('[FakeCall] Ringtone playback fallback (no network):', e.message);
-      // Fallback: use vibration-only pattern if audio fails
+      // Offline — vibration only
     }
   };
 
@@ -128,12 +137,10 @@ const FakeCallScreen = ({ navigation }) => {
         await ringtoneRef.current.unloadAsync();
         ringtoneRef.current = null;
       }
-    } catch (e) {
-      console.log('[FakeCall] Ringtone stop error:', e.message);
-    }
+    } catch (e) {}
   };
 
-  // ── Custom caller photo picker ──
+  // ── Custom caller photo ──
   const pickCallerPhoto = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -145,9 +152,7 @@ const FakeCallScreen = ({ navigation }) => {
       if (!result.canceled && result.assets?.[0]) {
         setCustomCaller(prev => ({ ...prev, photo: result.assets[0].uri }));
       }
-    } catch (e) {
-      console.log('[FakeCall] Photo pick error:', e.message);
-    }
+    } catch (e) {}
   };
 
   // ── Countdown timer ──
@@ -171,7 +176,7 @@ const FakeCallScreen = ({ navigation }) => {
     return () => clearInterval(timer);
   }, [isCallActive]);
 
-  // ── Ring pulse animation (concentric circles behind avatar) ──
+  // ── Ring pulse animation ──
   const startRingAnimation = () => {
     const createPulse = (anim, delay) =>
       Animated.loop(
@@ -207,20 +212,30 @@ const FakeCallScreen = ({ navigation }) => {
     ringPulse3.setValue(0);
   };
 
+  // ── Breathe animation for swipe button ──
+  const startBreatheAnimation = () => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breatheAnim, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(breatheAnim, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    breatheAnimRef.current = anim;
+    anim.start();
+  };
+
   // ── Swipe-to-answer PanResponder ──
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 5,
       onPanResponderMove: (_, gs) => {
-        if (gs.dx > 0) {
-          swipeX.setValue(Math.min(gs.dx, SCREEN_W * 0.55));
-        }
+        if (gs.dx > 0) swipeX.setValue(Math.min(gs.dx, SCREEN_W * 0.6));
       },
       onPanResponderRelease: (_, gs) => {
         if (gs.dx > SWIPE_THRESHOLD) {
           Animated.timing(swipeX, {
-            toValue: SCREEN_W * 0.55,
+            toValue: SCREEN_W * 0.6,
             duration: 150,
             useNativeDriver: true,
           }).start(() => answerCall());
@@ -248,29 +263,21 @@ const FakeCallScreen = ({ navigation }) => {
     setIsHold(false);
     swipeX.setValue(0);
 
-    // Realistic vibration pattern
     Vibration.vibrate([0, 800, 600, 800, 600, 800], true);
     startRingAnimation();
-    playRingtone(); // Play ringtone audio
-
-    slideAnim.setValue(SCREEN_H);
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 40,
-      friction: 10,
-    }).start();
+    startBreatheAnimation();
+    playRingtone();
 
     fadeAnim.setValue(0);
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 400,
+      duration: 350,
       useNativeDriver: true,
     }).start();
 
     const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.15, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.08, duration: 600, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       ])
     );
@@ -284,7 +291,7 @@ const FakeCallScreen = ({ navigation }) => {
       triggerIncomingCall();
     } else {
       setCountdown(selectedDelay);
-      Vibration.vibrate(100);
+      try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch(e) {}
     }
   };
 
@@ -294,25 +301,26 @@ const FakeCallScreen = ({ navigation }) => {
     stopRingAnimation();
     stopRingtone();
     if (pulseAnimRef.current) pulseAnimRef.current.stop();
+    if (breatheAnimRef.current) breatheAnimRef.current.stop();
 
     setIsIncoming(false);
     setCallConnecting(true);
     setIsCallActive(false);
 
-    // Realistic "connecting" delay
     setTimeout(() => {
       setCallConnecting(false);
       setIsCallActive(true);
       setCallDuration(0);
-    }, 1200 + Math.random() * 800);
+    }, 1000 + Math.random() * 1000);
   }, []);
 
-  // ── Decline / end call ──
+  // ── End call ──
   const endCall = useCallback(() => {
     Vibration.cancel();
     stopRingAnimation();
     stopRingtone();
     if (pulseAnimRef.current) pulseAnimRef.current.stop();
+    if (breatheAnimRef.current) breatheAnimRef.current.stop();
 
     setIsCallActive(false);
     setIsIncoming(false);
@@ -325,7 +333,6 @@ const FakeCallScreen = ({ navigation }) => {
     setIsSpeaker(false);
     setIsHold(false);
     swipeX.setValue(0);
-    slideAnim.setValue(SCREEN_H);
     fadeAnim.setValue(0);
   }, []);
 
@@ -348,7 +355,6 @@ const FakeCallScreen = ({ navigation }) => {
   };
 
   const addCustomCaller = () => {
-    // Security: Sanitize custom caller inputs (Vuln #6)
     const sanitizedName = customCaller.name.replace(/[<>{}\\/"'`;]/g, '').trim().substring(0, 30);
     const sanitizedNumber = customCaller.number.replace(/[^0-9+\-() ]/g, '').trim().substring(0, 15);
     if (sanitizedName) {
@@ -356,7 +362,6 @@ const FakeCallScreen = ({ navigation }) => {
         id: 'custom',
         name: sanitizedName,
         number: sanitizedNumber || '+91 00000 00000',
-        emoji: '📱',
         label: 'Mobile',
         photo: customCaller.photo || null,
       });
@@ -367,17 +372,14 @@ const FakeCallScreen = ({ navigation }) => {
 
   const onKeypadPress = (digit) => {
     setDtmfDigits(prev => prev + digit);
-    Vibration.vibrate(30);
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch(e) { Vibration.vibrate(20); }
   };
 
-  const getTimeString = () => {
-    const now = new Date();
-    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-  };
+  const callerColor = getAvatarColor(selectedCaller.name);
 
-  // ──────────────────────────────────────────────────────────
-  //  INCOMING CALL SCREEN — looks like stock Android dialer
-  // ──────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────
+  //  INCOMING CALL SCREEN — Stock Android Google Phone UI
+  // ────────────────────────────────────────────────────────
   if (isIncoming) {
     const renderRingPulse = (anim, size) => (
       <Animated.View
@@ -387,16 +389,17 @@ const FakeCallScreen = ({ navigation }) => {
             width: size,
             height: size,
             borderRadius: size / 2,
-            opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] }),
-            transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) }],
+            borderColor: callerColor + '30',
+            opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+            transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }) }],
           },
         ]}
       />
     );
 
-    const arrowOpacity = swipeX.interpolate({
-      inputRange: [0, SWIPE_THRESHOLD],
-      outputRange: [0.6, 0],
+    const swipeBg = swipeX.interpolate({
+      inputRange: [0, SCREEN_W * 0.6],
+      outputRange: ['rgba(52,168,83,0)', 'rgba(52,168,83,0.15)'],
       extrapolate: 'clamp',
     });
 
@@ -404,26 +407,14 @@ const FakeCallScreen = ({ navigation }) => {
       <View style={styles.incomingScreen}>
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-        {/* Top bar — clock + icons */}
-        <View style={styles.nativeStatusBar}>
-          <Text style={styles.nativeTime}>{getTimeString()}</Text>
-          <View style={styles.nativeIcons}>
-            <Ionicons name="cellular" size={14} color="rgba(255,255,255,0.8)" />
-            <Ionicons name="wifi" size={14} color="rgba(255,255,255,0.8)" />
-            <Ionicons name="battery-full" size={14} color="rgba(255,255,255,0.8)" />
-          </View>
-        </View>
-
-        {/* Caller info */}
+        {/* Caller info — centered */}
         <Animated.View style={[styles.incomingBody, { opacity: fadeAnim }]}>
-          <Text style={styles.incomingLabel}>Incoming call</Text>
-
-          {/* Ripple rings */}
+          {/* Ring pulses */}
           <View style={styles.avatarContainer}>
-            {renderRingPulse(ringPulse1, 160)}
-            {renderRingPulse(ringPulse2, 160)}
-            {renderRingPulse(ringPulse3, 160)}
-            <View style={styles.avatarCircle}>
+            {renderRingPulse(ringPulse1, 180)}
+            {renderRingPulse(ringPulse2, 180)}
+            {renderRingPulse(ringPulse3, 180)}
+            <View style={[styles.avatarCircle, { backgroundColor: callerColor }]}>
               {selectedCaller.photo ? (
                 <Image source={{ uri: selectedCaller.photo }} style={styles.avatarPhoto} />
               ) : (
@@ -434,93 +425,71 @@ const FakeCallScreen = ({ navigation }) => {
 
           <Text style={styles.incomingName}>{selectedCaller.name}</Text>
           <Text style={styles.incomingNumber}>{selectedCaller.number}</Text>
-          <Text style={styles.incomingNumberLabel}>{selectedCaller.label || 'Mobile'}</Text>
+          <Text style={styles.incomingSubLabel}>Incoming call</Text>
         </Animated.View>
 
-        {/* Bottom actions */}
+        {/* Bottom — answer / decline */}
         <View style={styles.incomingBottom}>
-          {/* Quick actions row */}
-          <View style={styles.quickActionsRow}>
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={styles.quickActionIcon}>
-                <Ionicons name="chatbubble" size={22} color="#fff" />
-              </View>
-              <Text style={styles.quickActionLabel}>Message</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={styles.quickActionIcon}>
-                <Ionicons name="alarm" size={22} color="#fff" />
-              </View>
-              <Text style={styles.quickActionLabel}>Remind me</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Decline button */}
-          <TouchableOpacity style={styles.declineBtn} onPress={endCall} activeOpacity={0.7}>
-            <MaterialIcons name="call-end" size={32} color="#fff" />
+          {/* Decline */}
+          <TouchableOpacity
+            style={styles.declineBtn}
+            onPress={endCall}
+            activeOpacity={0.7}
+          >
+            <MaterialIcons name="call-end" size={30} color="#fff" />
           </TouchableOpacity>
 
-          {/* Swipe to answer */}
-          <View style={styles.swipeTrack}>
-            <Animated.View style={[styles.swipeArrows, { opacity: arrowOpacity }]}>
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.5)" />
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+          {/* Answer */}
+          <TouchableOpacity
+            style={styles.answerBtn}
+            onPress={answerCall}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <MaterialIcons name="call" size={30} color="#fff" />
             </Animated.View>
+          </TouchableOpacity>
+        </View>
 
-            <Animated.View
-              style={[
-                styles.swipeThumb,
-                { transform: [{ translateX: swipeX }] },
-              ]}
-              {...panResponder.panHandlers}
-            >
-              <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                <View style={styles.answerBtnInner}>
-                  <MaterialIcons name="call" size={32} color="#fff" />
-                </View>
-              </Animated.View>
-            </Animated.View>
-
-            <Text style={styles.swipeHint}>Swipe to answer</Text>
-          </View>
+        <View style={styles.bottomLabelsRow}>
+          <Text style={styles.bottomLabel}>Decline</Text>
+          <Text style={styles.bottomLabel}>Answer</Text>
         </View>
       </View>
     );
   }
 
-  // ──────────────────────────────────────────────────────────
-  //  CONNECTING SCREEN — brief "Calling..." state
-  // ──────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────
+  //  CONNECTING SCREEN
+  // ────────────────────────────────────────────────────────
   if (callConnecting) {
     return (
-      <View style={styles.activeCallScreen}>
+      <View style={styles.callScreen}>
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-        <View style={styles.activeCallBody}>
-          <View style={styles.activeAvatarCircle}>
+        <View style={styles.callBody}>
+          <View style={[styles.callAvatarCircle, { backgroundColor: callerColor }]}>
             {selectedCaller.photo ? (
-              <Image source={{ uri: selectedCaller.photo }} style={styles.activeAvatarPhoto} />
+              <Image source={{ uri: selectedCaller.photo }} style={styles.callAvatarPhoto} />
             ) : (
-              <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.callAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
             )}
           </View>
-          <Text style={styles.activeCallerName}>{selectedCaller.name}</Text>
-          <Text style={styles.activeCallStatus}>Connecting...</Text>
+          <Text style={styles.callCallerName}>{selectedCaller.name}</Text>
+          <Text style={styles.callStatusText}>Calling...</Text>
         </View>
 
-        <View style={styles.activeCallBottom}>
+        <View style={styles.callBottomSection}>
           <TouchableOpacity style={styles.endCallBtn} onPress={endCall} activeOpacity={0.7}>
-            <MaterialIcons name="call-end" size={32} color="#fff" />
+            <MaterialIcons name="call-end" size={30} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // ──────────────────────────────────────────────────────────
-  //  ACTIVE CALL SCREEN — full dialer UI
-  // ──────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────
+  //  ACTIVE CALL SCREEN — Google Phone in-call UI
+  // ────────────────────────────────────────────────────────
   if (isCallActive) {
     const KEYPAD = [
       ['1', '2', '3'],
@@ -536,24 +505,24 @@ const FakeCallScreen = ({ navigation }) => {
     };
 
     return (
-      <View style={styles.activeCallScreen}>
+      <View style={styles.callScreen}>
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-        <View style={styles.activeCallBody}>
+        <View style={styles.callBody}>
           {!showKeypad && (
             <>
-              <View style={styles.activeAvatarCircle}>
+              <View style={[styles.callAvatarCircle, { backgroundColor: callerColor }]}>
                 {selectedCaller.photo ? (
-                  <Image source={{ uri: selectedCaller.photo }} style={styles.activeAvatarPhoto} />
+                  <Image source={{ uri: selectedCaller.photo }} style={styles.callAvatarPhoto} />
                 ) : (
-                  <Text style={styles.activeAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
+                  <Text style={styles.callAvatarLetter}>{selectedCaller.name.charAt(0).toUpperCase()}</Text>
                 )}
               </View>
-              <Text style={styles.activeCallerName}>{selectedCaller.name}</Text>
+              <Text style={styles.callCallerName}>{selectedCaller.name}</Text>
             </>
           )}
 
-          <Text style={styles.activeCallStatus}>
+          <Text style={styles.callStatusText}>
             {isHold ? 'On hold' : formatDuration(callDuration)}
           </Text>
 
@@ -565,7 +534,7 @@ const FakeCallScreen = ({ navigation }) => {
 
           {showKeypad && (
             <View style={styles.keypadSection}>
-              <Text style={styles.dtmfDisplay}>{dtmfDigits || ''}</Text>
+              <Text style={styles.dtmfDisplay}>{dtmfDigits || ' '}</Text>
               <View style={styles.keypadGrid}>
                 {KEYPAD.map((row, ri) => (
                   <View key={ri} style={styles.keypadRow}>
@@ -577,7 +546,9 @@ const FakeCallScreen = ({ navigation }) => {
                         activeOpacity={0.5}
                       >
                         <Text style={styles.keypadDigit}>{digit}</Text>
-                        <Text style={styles.keypadSub}>{KEYPAD_SUB[digit]}</Text>
+                        {KEYPAD_SUB[digit] ? (
+                          <Text style={styles.keypadSub}>{KEYPAD_SUB[digit]}</Text>
+                        ) : null}
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -587,14 +558,14 @@ const FakeCallScreen = ({ navigation }) => {
           )}
         </View>
 
-        {/* Control buttons — 2 rows of 3 */}
+        {/* Control grid — 2 rows x 3 */}
         <View style={styles.controlGrid}>
           <View style={styles.controlRow}>
             <TouchableOpacity
               style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
               onPress={() => setIsMuted(!isMuted)}
             >
-              <Ionicons name={isMuted ? 'mic-off' : 'mic'} size={26} color="#fff" />
+              <Ionicons name={isMuted ? 'mic-off' : 'mic'} size={24} color="#fff" />
               <Text style={styles.controlLabel}>Mute</Text>
             </TouchableOpacity>
 
@@ -602,7 +573,7 @@ const FakeCallScreen = ({ navigation }) => {
               style={[styles.controlBtn, showKeypad && styles.controlBtnActive]}
               onPress={() => setShowKeypad(!showKeypad)}
             >
-              <MaterialIcons name="dialpad" size={26} color="#fff" />
+              <MaterialIcons name="dialpad" size={24} color="#fff" />
               <Text style={styles.controlLabel}>Keypad</Text>
             </TouchableOpacity>
 
@@ -610,14 +581,14 @@ const FakeCallScreen = ({ navigation }) => {
               style={[styles.controlBtn, isSpeaker && styles.controlBtnActive]}
               onPress={() => setIsSpeaker(!isSpeaker)}
             >
-              <Ionicons name={isSpeaker ? 'volume-high' : 'volume-medium'} size={26} color="#fff" />
+              <Ionicons name={isSpeaker ? 'volume-high' : 'volume-medium'} size={24} color="#fff" />
               <Text style={styles.controlLabel}>Speaker</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.controlRow}>
             <TouchableOpacity style={styles.controlBtn}>
-              <Ionicons name="add-circle-outline" size={26} color="#fff" />
+              <Ionicons name="add" size={24} color="#fff" />
               <Text style={styles.controlLabel}>Add call</Text>
             </TouchableOpacity>
 
@@ -625,110 +596,100 @@ const FakeCallScreen = ({ navigation }) => {
               style={[styles.controlBtn, isHold && styles.controlBtnActive]}
               onPress={() => setIsHold(!isHold)}
             >
-              <Ionicons name="pause" size={26} color="#fff" />
+              <Ionicons name="pause" size={24} color="#fff" />
               <Text style={styles.controlLabel}>Hold</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.controlBtn}>
-              <MaterialCommunityIcons name="video-outline" size={26} color="#fff" />
-              <Text style={styles.controlLabel}>Video</Text>
+              <MaterialCommunityIcons name="record-circle-outline" size={24} color="#fff" />
+              <Text style={styles.controlLabel}>Record</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* End call */}
-        <View style={styles.activeCallBottom}>
+        <View style={styles.callBottomSection}>
           <TouchableOpacity style={styles.endCallBtn} onPress={endCall} activeOpacity={0.7}>
-            <MaterialIcons name="call-end" size={32} color="#fff" />
+            <MaterialIcons name="call-end" size={30} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // ──────────────────────────────────────────────────────────
-  //  SETUP SCREEN — disguised as "Quick Dial"
-  // ──────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────
+  //  SETUP SCREEN — Disguised as "Quick Dial"
+  // ────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.secondary} barStyle="light-content" />
+      <StatusBar backgroundColor="#272738" barStyle="light-content" />
 
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Quick Dial</Text>
-        <TouchableOpacity style={styles.headerInfoBtn}>
-          <Ionicons name="shield-checkmark" size={22} color="rgba(255,255,255,0.7)" />
-        </TouchableOpacity>
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
-        style={styles.content}
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Discreet info banner */}
+        {/* Info banner */}
         <View style={styles.infoBanner}>
-          <Ionicons name="information-circle" size={20} color="#4527A0" />
+          <Ionicons name="information-circle-outline" size={20} color="#5C6BC0" />
           <Text style={styles.infoText}>
-            Schedule a call to help you step away from any situation safely.
+            Schedule a realistic call to help you leave any situation safely
           </Text>
         </View>
 
         {/* Select Caller */}
-        <Text style={styles.sectionTitle}>Contact</Text>
+        <Text style={styles.sectionTitle}>Select contact</Text>
         <View style={styles.callerGrid}>
-          {PRESET_CALLERS.map((caller) => (
-            <TouchableOpacity
-              key={caller.id}
-              style={[
-                styles.callerOption,
-                selectedCaller.id === caller.id && styles.callerOptionActive,
-              ]}
-              onPress={() => setSelectedCaller(caller)}
-              activeOpacity={0.7}
-            >
-              <View style={[
-                styles.callerAvatar,
-                selectedCaller.id === caller.id && styles.callerAvatarSelected,
-              ]}>
-                <Text style={[
-                  styles.callerInitial,
-                  selectedCaller.id === caller.id && styles.callerInitialSelected,
-                ]}>
-                  {caller.name.charAt(0)}
-                </Text>
-              </View>
-              <Text style={[
-                styles.callerName,
-                selectedCaller.id === caller.id && styles.callerNameSelected,
-              ]} numberOfLines={1}>
-                {caller.name} {caller.emoji}
-              </Text>
-              {selectedCaller.id === caller.id && (
-                <View style={styles.callerCheck}>
-                  <Ionicons name="checkmark-circle" size={16} color={COLORS.secondary} />
+          {PRESET_CALLERS.map((caller) => {
+            const isSelected = selectedCaller.id === caller.id;
+            const color = getAvatarColor(caller.name);
+            return (
+              <TouchableOpacity
+                key={caller.id}
+                style={[styles.callerCard, isSelected && styles.callerCardActive]}
+                onPress={() => setSelectedCaller(caller)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.callerAvatar, { backgroundColor: isSelected ? color : color + '18' }]}>
+                  <Text style={[styles.callerInitial, { color: isSelected ? '#fff' : color }]}>
+                    {caller.name.charAt(0)}
+                  </Text>
                 </View>
-              )}
-            </TouchableOpacity>
-          ))}
+                <Text style={[styles.callerName, isSelected && styles.callerNameActive]} numberOfLines={1}>
+                  {caller.name}
+                </Text>
+                {isSelected && (
+                  <View style={[styles.callerCheck, { backgroundColor: color }]}>
+                    <Ionicons name="checkmark" size={10} color="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
           <TouchableOpacity
-            style={styles.callerOption}
+            style={styles.callerCard}
             onPress={() => setCustomModalVisible(true)}
             activeOpacity={0.7}
           >
-            <View style={styles.callerAvatar}>
-              <Ionicons name="add" size={22} color={COLORS.secondary} />
+            <View style={[styles.callerAvatar, { backgroundColor: '#E8E8EE' }]}>
+              <Ionicons name="add" size={20} color="#666" />
             </View>
             <Text style={styles.callerName}>Custom</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Delay selection */}
-        <Text style={styles.sectionTitle}>Delay</Text>
-        <View style={styles.delayGrid}>
+        {/* Delay */}
+        <Text style={styles.sectionTitle}>Call after</Text>
+        <View style={styles.delayRow}>
           {DELAY_OPTIONS.map((option) => (
             <TouchableOpacity
               key={option.value}
@@ -749,58 +710,53 @@ const FakeCallScreen = ({ navigation }) => {
           ))}
         </View>
 
-        {/* Selected caller preview */}
+        {/* Preview card */}
         <View style={styles.previewCard}>
-          <View style={styles.previewAvatar}>
+          <View style={[styles.previewAvatar, { backgroundColor: callerColor }]}>
             <Text style={styles.previewInitial}>{selectedCaller.name.charAt(0)}</Text>
           </View>
           <View style={styles.previewInfo}>
             <Text style={styles.previewName}>{selectedCaller.name}</Text>
             <Text style={styles.previewNumber}>{selectedCaller.number}</Text>
           </View>
-          <View style={styles.previewDelay}>
-            <Ionicons name="time-outline" size={14} color={COLORS.textSecondary} />
+          <View style={styles.previewDelayBadge}>
+            <Ionicons name="time-outline" size={13} color="#888" />
             <Text style={styles.previewDelayText}>
-              {selectedDelay === 0 ? 'Instant' : formatCountdown(selectedDelay)}
+              {selectedDelay === 0 ? 'Now' : formatCountdown(selectedDelay)}
             </Text>
           </View>
         </View>
 
-        {/* Countdown display */}
+        {/* Countdown */}
         {countdown !== null && (
           <View style={styles.countdownBanner}>
-            <View style={styles.countdownPulse}>
-              <Ionicons name="call" size={20} color={COLORS.secondary} />
+            <View style={styles.countdownIconWrap}>
+              <Ionicons name="call" size={18} color="#1A73E8" />
             </View>
             <View style={styles.countdownInfo}>
-              <Text style={styles.countdownText}>
-                Call in {formatCountdown(countdown)}
-              </Text>
-              <Text style={styles.countdownSubtext}>Stay on this screen or go back — the call will come through</Text>
+              <Text style={styles.countdownText}>Calling in {formatCountdown(countdown)}</Text>
+              <Text style={styles.countdownSub}>The call will ring even if you leave this screen</Text>
             </View>
             <TouchableOpacity onPress={() => setCountdown(null)} style={styles.countdownCancel}>
-              <Ionicons name="close" size={20} color={COLORS.danger} />
+              <Ionicons name="close" size={18} color="#D93025" />
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Start button */}
+        {/* Call button */}
         <TouchableOpacity
-          style={[
-            styles.startBtn,
-            countdown !== null && styles.startBtnDisabled,
-          ]}
+          style={[styles.callButton, countdown !== null && { opacity: 0.5 }]}
           onPress={handleScheduleCall}
           disabled={countdown !== null}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
-          <MaterialIcons name="call" size={24} color="#fff" />
-          <Text style={styles.startBtnText}>
+          <MaterialIcons name="call" size={22} color="#fff" />
+          <Text style={styles.callButtonText}>
             {selectedDelay === 0 ? 'Call Now' : 'Schedule Call'}
           </Text>
         </TouchableOpacity>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Custom Caller Modal */}
@@ -812,7 +768,7 @@ const FakeCallScreen = ({ navigation }) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Contact</Text>
+            <Text style={styles.modalTitle}>New Contact</Text>
 
             <View style={styles.modalField}>
               <Text style={styles.modalLabel}>Name</Text>
@@ -838,19 +794,14 @@ const FakeCallScreen = ({ navigation }) => {
               />
             </View>
 
-            {/* Caller Photo Picker */}
             <View style={styles.modalField}>
-              <Text style={styles.modalLabel}>Caller Photo (optional)</Text>
-              <TouchableOpacity
-                style={styles.photoPickerBtn}
-                onPress={pickCallerPhoto}
-                accessibilityLabel="Pick caller photo from gallery"
-              >
+              <Text style={styles.modalLabel}>Photo (optional)</Text>
+              <TouchableOpacity style={styles.photoPickerBtn} onPress={pickCallerPhoto}>
                 {customCaller.photo ? (
                   <Image source={{ uri: customCaller.photo }} style={styles.photoPickerPreview} />
                 ) : (
                   <View style={styles.photoPickerPlaceholder}>
-                    <Ionicons name="camera" size={24} color={COLORS.textLight} />
+                    <Ionicons name="camera-outline" size={22} color="#999" />
                     <Text style={styles.photoPickerText}>Choose Photo</Text>
                   </View>
                 )}
@@ -865,11 +816,11 @@ const FakeCallScreen = ({ navigation }) => {
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSaveBtn, !customCaller.name.trim() && { opacity: 0.5 }]}
+                style={[styles.modalSaveBtn, !customCaller.name.trim() && { opacity: 0.4 }]}
                 onPress={addCustomCaller}
                 disabled={!customCaller.name.trim()}
               >
-                <Text style={styles.modalSaveText}>Done</Text>
+                <Text style={styles.modalSaveText}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -879,222 +830,175 @@ const FakeCallScreen = ({ navigation }) => {
   );
 };
 
-// ─── Styles ─────────────────────────────────────────────────────
+// ─── Styles ──────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  // ── Incoming Call Screen ──
+  // ═══ Incoming Call ═══
   incomingScreen: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
-  },
-  nativeStatusBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 54 : 38,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-  },
-  nativeTime: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  nativeIcons: {
-    flexDirection: 'row',
-    gap: 6,
+    backgroundColor: '#1B1B1F',
   },
   incomingBody: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: 40,
-  },
-  incomingLabel: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 14,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    marginBottom: 28,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 20,
   },
   avatarContainer: {
-    width: 160,
-    height: 160,
+    width: 180,
+    height: 180,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
   },
   ringPulse: {
     position: 'absolute',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 2,
   },
   avatarCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: '#3d5afe',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
   avatarPhoto: {
-    width: 90, height: 90, borderRadius: 45,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
   },
   avatarLetter: {
-    fontSize: 38,
-    fontWeight: '600',
+    fontSize: 40,
+    fontWeight: '400',
     color: '#fff',
   },
   incomingName: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '600',
+    color: '#E3E3E8',
+    fontSize: 30,
+    fontWeight: '400',
+    letterSpacing: 0.2,
+    marginBottom: 8,
+  },
+  incomingNumber: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 16,
+    fontWeight: '400',
     letterSpacing: 0.3,
     marginBottom: 6,
   },
-  incomingNumber: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 16,
+  incomingSubLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 14,
     fontWeight: '400',
-    marginBottom: 4,
-  },
-  incomingNumberLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 13,
-    fontWeight: '400',
-    textTransform: 'capitalize',
   },
   incomingBottom: {
-    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
-    paddingHorizontal: 30,
-    alignItems: 'center',
-  },
-  quickActionsRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 50,
-    marginBottom: 36,
-  },
-  quickAction: {
+    justifyContent: 'space-around',
     alignItems: 'center',
-    gap: 6,
+    paddingHorizontal: 60,
+    paddingBottom: 12,
   },
-  quickActionIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  bottomLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 60,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 40,
   },
-  quickActionLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
+  bottomLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
     fontWeight: '400',
   },
   declineBtn: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ea4335',
+    backgroundColor: '#EA4335',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 28,
+    elevation: 4,
+    shadowColor: '#EA4335',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  swipeTrack: {
-    width: SCREEN_W - 60,
+  answerBtn: {
+    width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  swipeArrows: {
-    position: 'absolute',
-    right: 24,
-    flexDirection: 'row',
-    gap: -8,
-  },
-  swipeThumb: {
-    position: 'absolute',
-    left: 4,
-  },
-  answerBtnInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#34a853',
+    backgroundColor: '#34A853',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  swipeHint: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 13,
-    fontWeight: '400',
-    textAlign: 'center',
-    position: 'absolute',
-    width: '100%',
+    elevation: 4,
+    shadowColor: '#34A853',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 
-  // ── Active Call Screen ──
-  activeCallScreen: {
+  // ═══ Active / Connecting Call Screen ═══
+  callScreen: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#1B1B1F',
   },
-  activeCallBody: {
+  callBody: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: Platform.OS === 'ios' ? 80 : 60,
   },
-  activeAvatarCircle: {
+  callAvatarCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#3d5afe',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
     overflow: 'hidden',
   },
-  activeAvatarPhoto: {
-    width: 80, height: 80, borderRadius: 40,
+  callAvatarPhoto: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
-  activeAvatarLetter: {
+  callAvatarLetter: {
     fontSize: 34,
-    fontWeight: '600',
+    fontWeight: '400',
     color: '#fff',
   },
-  activeCallerName: {
-    color: '#fff',
+  callCallerName: {
+    color: '#E3E3E8',
     fontSize: 24,
-    fontWeight: '600',
+    fontWeight: '400',
     marginBottom: 6,
   },
-  activeCallStatus: {
-    color: 'rgba(255,255,255,0.55)',
+  callStatusText: {
+    color: 'rgba(255,255,255,0.50)',
     fontSize: 15,
     fontWeight: '400',
     fontVariant: ['tabular-nums'],
   },
   hdBadge: {
-    marginTop: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   hdBadgeText: {
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
+
+  // ═══ Controls ═══
   controlGrid: {
-    paddingHorizontal: 24,
-    gap: 20,
-    marginBottom: 30,
+    paddingHorizontal: 28,
+    gap: 16,
+    marginBottom: 28,
   },
   controlRow: {
     flexDirection: 'row',
@@ -1103,21 +1007,21 @@ const styles = StyleSheet.create({
   controlBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: 'rgba(255,255,255,0.08)',
     gap: 4,
   },
   controlBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
   controlLabel: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.65)',
     fontSize: 11,
     fontWeight: '400',
   },
-  activeCallBottom: {
+  callBottomSection: {
     alignItems: 'center',
     paddingBottom: Platform.OS === 'ios' ? 50 : 36,
   },
@@ -1125,17 +1029,22 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: '#ea4335',
+    backgroundColor: '#EA4335',
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#EA4335',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 
-  // ── Keypad ──
+  // ═══ Keypad ═══
   keypadSection: {
     alignItems: 'center',
     marginTop: 10,
     width: '100%',
-    paddingHorizontal: 40,
+    paddingHorizontal: 44,
   },
   dtmfDisplay: {
     color: '#fff',
@@ -1147,7 +1056,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   keypadGrid: {
-    gap: 12,
+    gap: 10,
     width: '100%',
   },
   keypadRow: {
@@ -1168,70 +1077,66 @@ const styles = StyleSheet.create({
     fontWeight: '300',
   },
   keypadSub: {
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(255,255,255,0.35)',
     fontSize: 10,
     fontWeight: '500',
     letterSpacing: 2,
     marginTop: -2,
   },
 
-  // ── Setup Screen ──
+  // ═══ Setup Screen ═══
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F5F5F8',
   },
   header: {
-    backgroundColor: COLORS.secondary,
+    backgroundColor: '#272738',
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 54 : 44,
     paddingBottom: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backBtn: {
     padding: 8,
-    backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: 12,
   },
   headerTitle: {
-    color: COLORS.white,
+    color: '#fff',
     fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
-  headerInfoBtn: {
-    padding: 8,
-  },
-  content: {
+  scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
   },
   infoBanner: {
-    backgroundColor: '#EDE7F6',
-    borderRadius: 14,
+    backgroundColor: '#E8EAF6',
+    borderRadius: 12,
     padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 22,
   },
   infoText: {
     flex: 1,
     fontSize: 13,
-    color: '#4527A0',
+    color: '#3949AB',
     lineHeight: 18,
+    fontWeight: '400',
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A1A24',
     marginBottom: 12,
     marginTop: 4,
+    letterSpacing: 0.1,
   },
   callerGrid: {
     flexDirection: 'row',
@@ -1239,101 +1144,110 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 24,
   },
-  callerOption: {
-    backgroundColor: COLORS.card,
+  callerCard: {
+    backgroundColor: '#fff',
     borderRadius: 14,
     padding: 12,
     alignItems: 'center',
     width: (SCREEN_W - 52) / 3,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'transparent',
-    ...SHADOWS.small,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
   },
-  callerOptionActive: {
-    borderColor: COLORS.secondary,
-    backgroundColor: COLORS.secondaryLight + '15',
+  callerCardActive: {
+    borderColor: '#1A73E8',
+    backgroundColor: '#E8F0FE',
   },
   callerAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: '#e8e0f0',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 6,
   },
-  callerAvatarSelected: {
-    backgroundColor: COLORS.secondary,
-  },
   callerInitial: {
-    fontSize: 19,
-    fontWeight: '700',
-    color: COLORS.secondary,
-  },
-  callerInitialSelected: {
-    color: '#fff',
+    fontSize: 18,
+    fontWeight: '500',
   },
   callerName: {
     fontSize: 12,
-    color: COLORS.text,
-    fontWeight: '600',
+    color: '#444',
+    fontWeight: '500',
     textAlign: 'center',
   },
-  callerNameSelected: {
-    color: COLORS.secondary,
+  callerNameActive: {
+    color: '#1A73E8',
+    fontWeight: '600',
   },
   callerCheck: {
     position: 'absolute',
     top: 6,
     right: 6,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  delayGrid: {
+
+  // Delay chips
+  delayRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 24,
   },
   delayChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
   delayChipActive: {
-    backgroundColor: COLORS.secondary,
-    borderColor: COLORS.secondary,
+    backgroundColor: '#1A73E8',
+    borderColor: '#1A73E8',
   },
   delayChipText: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '600',
+    fontSize: 13,
+    color: '#444',
+    fontWeight: '500',
   },
   delayChipTextActive: {
     color: '#fff',
   },
+
+  // Preview card
   previewCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderRadius: 14,
     padding: 16,
-    marginBottom: 20,
-    ...SHADOWS.small,
+    marginBottom: 18,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
   },
   previewAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#3d5afe',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
   },
   previewInitial: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '400',
     color: '#fff',
   },
   previewInfo: {
@@ -1341,43 +1255,45 @@ const styles = StyleSheet.create({
   },
   previewName: {
     fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: '600',
+    color: '#1A1A24',
     marginBottom: 2,
   },
   previewNumber: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: '#888',
     fontVariant: ['tabular-nums'],
   },
-  previewDelay: {
+  previewDelayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#f0edf5',
+    backgroundColor: '#F0F0F4',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 10,
   },
   previewDelayText: {
     fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
+    color: '#888',
+    fontWeight: '500',
   },
+
+  // Countdown banner
   countdownBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EDE7F6',
-    borderRadius: 16,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 14,
     padding: 14,
-    marginBottom: 20,
+    marginBottom: 18,
     gap: 12,
   },
-  countdownPulse: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.secondary + '20',
+  countdownIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#BBDEFB',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1385,38 +1301,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   countdownText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.secondary,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A73E8',
   },
-  countdownSubtext: {
+  countdownSub: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: '#5C6BC0',
     marginTop: 2,
   },
   countdownCancel: {
     padding: 8,
   },
-  startBtn: {
+
+  // Call NOW button
+  callButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: COLORS.secondary,
-    borderRadius: 16,
-    paddingVertical: 18,
-    ...SHADOWS.medium,
+    backgroundColor: '#34A853',
+    borderRadius: 14,
+    paddingVertical: 17,
+    elevation: 3,
+    shadowColor: '#34A853',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
   },
-  startBtnDisabled: {
-    opacity: 0.5,
-  },
-  startBtnText: {
+  callButtonText: {
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
   },
 
-  // ── Custom Caller Modal ──
+  // ═══ Custom Caller Modal ═══
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1430,8 +1349,8 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: '600',
+    color: '#1A1A24',
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -1440,19 +1359,19 @@ const styles = StyleSheet.create({
   },
   modalLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '500',
+    color: '#888',
     marginBottom: 6,
   },
   modalInput: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F5F5F8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: COLORS.text,
+    color: '#1A1A24',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#E0E0E0',
   },
   modalBtns: {
     flexDirection: 'row',
@@ -1464,11 +1383,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: COLORS.border,
+    borderColor: '#E0E0E0',
     alignItems: 'center',
   },
   modalCancelText: {
-    color: COLORS.textSecondary,
+    color: '#888',
     fontWeight: '600',
     fontSize: 15,
   },
@@ -1476,29 +1395,38 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: COLORS.secondary,
+    backgroundColor: '#1A73E8',
     alignItems: 'center',
   },
   modalSaveText: {
     color: '#fff',
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: 15,
   },
-  // Photo picker
   photoPickerBtn: {
-    height: 80, borderRadius: 14,
-    borderWidth: 1.5, borderColor: COLORS.border, borderStyle: 'dashed',
-    justifyContent: 'center', alignItems: 'center',
-    backgroundColor: COLORS.background, overflow: 'hidden',
+    height: 80,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAFAFA',
+    overflow: 'hidden',
   },
   photoPickerPreview: {
-    width: '100%', height: '100%', borderRadius: 14,
+    width: '100%',
+    height: '100%',
+    borderRadius: 14,
   },
   photoPickerPlaceholder: {
-    alignItems: 'center', gap: 4,
+    alignItems: 'center',
+    gap: 4,
   },
   photoPickerText: {
-    fontSize: 11, color: COLORS.textLight, fontWeight: '600',
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '500',
   },
 });
 
