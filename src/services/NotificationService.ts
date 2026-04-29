@@ -5,6 +5,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Logger from '../utils/logger';
 
 // ── Types ────────────────────────────────────────────────────────
 interface InitOptions {
@@ -119,7 +120,7 @@ const NotificationService = {
       }
 
       if (finalStatus !== 'granted') {
-        console.log('[Notifications] Permission denied');
+        Logger.log('[Notifications] Permission denied');
         return { success: false, error: 'permission_denied' };
       }
 
@@ -128,14 +129,14 @@ const NotificationService = {
         if (projectId) {
           const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
           _pushToken = tokenData.data;
-          console.log('[Notifications] Push token:', _pushToken);
+          Logger.log('[Notifications] Push token:', _pushToken);
         }
       } catch (e: any) {
-        console.log('[Notifications] Push token error (expected in dev):', e.message);
+        Logger.log('[Notifications] Push token error (expected in dev):', e.message);
       }
 
       _notificationListener = Notifications.addNotificationReceivedListener((notification) => {
-        console.log('[Notifications] Received:', notification.request.content.title);
+        Logger.log('[Notifications] Received:', notification.request.content.title);
         if (onNotification) onNotification(notification);
       });
 
@@ -148,10 +149,10 @@ const NotificationService = {
         }
       });
 
-      console.log('[Notifications] Initialized successfully');
+      Logger.log('[Notifications] Initialized successfully');
       return { success: true, pushToken: _pushToken };
     } catch (e: any) {
-      console.error('[Notifications] Init error:', e);
+      Logger.error('[Notifications] Init error:', e);
       return { success: false, error: e.message };
     }
   },
@@ -175,7 +176,7 @@ const NotificationService = {
         identifier: 'persistent-sos',
       });
     } catch (e) {
-      console.error('[Notifications] Persistent notification error:', e);
+      Logger.error('[Notifications] Persistent notification error:', e);
     }
   },
 
@@ -207,7 +208,7 @@ const NotificationService = {
         identifier: 'sos-active',
       });
     } catch (e) {
-      console.error('[Notifications] SOS notification error:', e);
+      Logger.error('[Notifications] SOS notification error:', e);
     }
   },
 
@@ -273,7 +274,7 @@ const NotificationService = {
 
       return { success: false, sent: 0, total: contacts.length, reason: 'no_tokens' };
     } catch (e: any) {
-      console.error('[Notifications] Push send error:', e);
+      Logger.error('[Notifications] Push send error:', e);
       return { success: false, error: e.message };
     }
   },
@@ -296,7 +297,7 @@ const NotificationService = {
         identifier: 'checkin-reminder',
       });
     } catch (e) {
-      console.error('[Notifications] Check-in reminder error:', e);
+      Logger.error('[Notifications] Check-in reminder error:', e);
     }
   },
 
@@ -318,7 +319,7 @@ const NotificationService = {
         identifier: 'journey-overdue',
       });
     } catch (e) {
-      console.error('[Notifications] Journey overdue error:', e);
+      Logger.error('[Notifications] Journey overdue error:', e);
     }
   },
 
@@ -367,7 +368,7 @@ const NotificationService = {
         trigger: delaySeconds > 0 ? { seconds: delaySeconds } as any : null,
       });
     } catch (e) {
-      console.error('[Notifications] Schedule error:', e);
+      Logger.error('[Notifications] Schedule error:', e);
     }
   },
 
@@ -375,7 +376,7 @@ const NotificationService = {
     try {
       await Notifications.cancelAllScheduledNotificationsAsync();
     } catch (e) {
-      console.error('[Notifications] Cancel error:', e);
+      Logger.error('[Notifications] Cancel error:', e);
     }
   },
 

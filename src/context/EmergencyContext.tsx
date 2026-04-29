@@ -12,7 +12,6 @@ import { Alert } from 'react-native';
 import {
   startLiveLocationTracking,
   stopLiveLocationTracking,
-  sendSOSToContacts,
   sendLiveLocationUpdate,
   requestLocationPermission,
   makePhoneCall,
@@ -23,6 +22,7 @@ import BackgroundLocationService from '../services/BackgroundLocationService';
 import NotificationService from '../services/NotificationService';
 import LiveLocationSharingService from '../services/LiveLocationSharingService';
 import EncryptedStorageService from '../services/EncryptedStorageService';
+import Logger from '../utils/logger';
 import type { EmergencySettings, EmergencyContact, LocationData } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -247,7 +247,6 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
   const journeyLocationRef = useRef<Location.LocationSubscription | null>(null);
   const journeyBreadcrumbsRef = useRef<Breadcrumb[]>([]);
   const lastBreadcrumbRef = useRef<Breadcrumb | null>(null);
-  const motionCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Load saved data on mount ──
   useEffect(() => {
@@ -302,29 +301,40 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
 
     if (settings.inactivitySOSEnabled && !isSOSActive) {
       let warnedOnce = false;
-      inactivityRef.current = setInterval(() => {
+      let escalationFired = false;
+      inactivityRef.current = setInterval(async () => {
         const elapsed = (Date.now() - lastCheckIn.getTime()) / 1000 / 60;
-        if (elapsed >= settings.inactivityTimeout) {
-          if (!warnedOnce) {
-            setCheckInOverdue(true);
-            warnedOnce = true;
-            Alert.alert(
-              '⏱️ Check-In Overdue!',
-              `You haven't checked in for ${settings.inactivityTimeout} minutes. Are you safe?`,
-              [
-                { text: "I'm Safe ✓", onPress: () => { checkIn(); warnedOnce = false; } },
-                { text: '🆘 Send SOS', style: 'destructive', onPress: () => triggerSOS() },
-              ],
-              { cancelable: false }
-            );
-          }
-          if (warnedOnce && elapsed >= settings.inactivityTimeout + 5) {
-            console.log('[Inactivity] Auto-triggering SOS after extended inactivity');
-            triggerSOS();
-            warnedOnce = false;
-          }
-        } else {
+        if (elapsed < settings.inactivityTimeout) {
           warnedOnce = false;
+          escalationFired = false;
+          return;
+        }
+
+        if (!warnedOnce) {
+          setCheckInOverdue(true);
+          warnedOnce = true;
+          // Push notification escalation — alert must reach the user
+          // even if the screen is locked or app is backgrounded.
+          try {
+            await NotificationService.showCheckInReminder(Math.round(elapsed));
+          } catch {}
+          Alert.alert(
+            '⏱️ Check-In Overdue!',
+            `You haven't checked in for ${Math.round(elapsed)} minutes. Tap below to confirm you're safe.`,
+            [
+              { text: "I'm Safe ✓", onPress: () => { checkIn(); warnedOnce = false; escalationFired = false; } },
+              { text: '🆘 Send SOS', style: 'destructive', onPress: () => triggerSOS() },
+            ],
+            { cancelable: false },
+          );
+        }
+
+        // Escalation: re-notify (don't auto-trigger SOS without consent).
+        if (warnedOnce && !escalationFired && elapsed >= settings.inactivityTimeout + 10) {
+          escalationFired = true;
+          try {
+            await NotificationService.showCheckInReminder(Math.round(elapsed));
+          } catch {}
         }
       }, 30000);
     }
@@ -416,7 +426,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         setIsBackgroundTracking(true);
       }
     } catch (error) {
-      console.error('Error loading saved data:', error);
+      Logger.error('Error loading saved data:', error);
     }
   };
 
@@ -426,7 +436,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       await EncryptedStorageService.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
       setEmergencyContacts(contacts);
     } catch (error) {
-      console.error('Error saving contacts:', error);
+      Logger.error('Error saving contacts:', error);
     }
   };
 
@@ -482,7 +492,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         }
       }
     } catch (error) {
-      console.error('Error saving settings:', error);
+      Logger.error('Error saving settings:', error);
     }
   };
 
@@ -491,7 +501,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       await EncryptedStorageService.setItem(STORAGE_KEYS.SOS_MESSAGE, message);
       setSosMessage(message);
     } catch (error) {
-      console.error('Error saving SOS message:', error);
+      Logger.error('Error saving SOS message:', error);
     }
   };
 
@@ -501,7 +511,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.STEALTH, JSON.stringify(newVal));
     } catch (e) {
-      console.error('Error saving stealth mode:', e);
+      Logger.error('Error saving stealth mode:', e);
     }
   };
 
@@ -509,15 +519,17 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
   const triggerSOS = useCallback(async (): Promise<void> => {
     const now = Date.now();
     if (isSOSActive) {
-      console.log('[SOS] Already active — ignoring duplicate trigger');
+      Logger.log('[SOS] Already active — ignoring duplicate trigger');
       return;
     }
+    // Cooldown is set ONLY after a confirmed-success SOS (see end of
+    // function). Failed/cancelled triggers leave the cooldown alone so
+    // the user can retry immediately — critical for emergencies.
     if (now - lastSOSTriggerRef.current < SOS_COOLDOWN_MS) {
       const remaining = Math.ceil((SOS_COOLDOWN_MS - (now - lastSOSTriggerRef.current)) / 1000);
       Alert.alert('SOS Cooldown', `Please wait ${remaining}s before triggering SOS again.`);
       return;
     }
-    lastSOSTriggerRef.current = now;
 
     setIsSOSActive(true);
     const entry: SOSHistoryEntry = {
@@ -534,9 +546,9 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
     try {
       await BackgroundLocationService.activateSOSMode();
       setIsBackgroundTracking(true);
-      console.log('[SOS] Background location SOS mode activated');
+      Logger.log('[SOS] Background location SOS mode activated');
     } catch (e) {
-      console.error('[SOS] Background location SOS mode error:', e);
+      Logger.error('[SOS] Background location SOS mode error:', e);
     }
 
     // Live location sharing session
@@ -550,18 +562,18 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         if (session) {
           setLiveShareSession(session as LiveShareSession);
           setIsLiveSharing(true);
-          console.log('[SOS] Live sharing started:', session.shareUrl);
+          Logger.log('[SOS] Live sharing started:', session.shareUrl);
         }
       }
     } catch (e) {
-      console.error('[SOS] Live sharing error:', e);
+      Logger.error('[SOS] Live sharing error:', e);
     }
 
     // SOS active push notification
     try {
       await NotificationService.sendSOSActiveNotification();
     } catch (e) {
-      console.error('[SOS] Push notification error:', e);
+      Logger.error('[SOS] Push notification error:', e);
     }
 
     // Start live location tracking
@@ -577,10 +589,10 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       if (subscription) {
         locationWatcherRef.current = subscription;
         setIsLiveTracking(true);
-        console.log('[SOS] Live location tracking started');
+        Logger.log('[SOS] Live location tracking started');
       }
     } catch (e) {
-      console.error('[SOS] Failed to start live tracking:', e);
+      Logger.error('[SOS] Failed to start live tracking:', e);
     }
 
     // Broadcast SOS to nearby users
@@ -590,20 +602,20 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       );
       if (sosResult?.alertId) {
         await OfflineLocationService.startLiveSOSBroadcast(sosResult.alertId);
-        console.log('[SOS] Nearby broadcast started, alertId:', sosResult.alertId);
+        Logger.log('[SOS] Nearby broadcast started, alertId:', sosResult.alertId);
       }
     } catch (e) {
-      console.error('[SOS] Failed to start nearby broadcast:', e);
+      Logger.error('[SOS] Failed to start nearby broadcast:', e);
     }
 
     // Activate AI SOS services (siren, recording, photo)
     try {
       const aiResult = await SafetyAIService.activateSOSServices(settings);
-      console.log('[SOS] AI services activated:', aiResult);
+      Logger.log('[SOS] AI services activated:', aiResult);
       if (aiResult.siren) setSirenActive(true);
       if (aiResult.recording) setIsRecording(true);
     } catch (e) {
-      console.error('[SOS] AI services activation error:', e);
+      Logger.error('[SOS] AI services activation error:', e);
     }
 
     // Auto call police if enabled
@@ -611,36 +623,46 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       try {
         setTimeout(() => makePhoneCall('112'), 3000);
       } catch (e) {
-        console.error('[SOS] Auto call police error:', e);
+        Logger.error('[SOS] Auto call police error:', e);
       }
     }
 
     // Start periodic location update SMS
     locationUpdateTimerRef.current = setInterval(async () => {
       if (lastLocationSentRef.current && emergencyContacts.length > 0) {
-        console.log('[SOS] Sending periodic live location update');
+        Logger.log('[SOS] Sending periodic live location update');
         await sendLiveLocationUpdate(emergencyContacts, lastLocationSentRef.current);
       }
     }, 2 * 60 * 1000);
+
+    // Set cooldown only after the SOS pipeline successfully kicked off
+    // (background mode, live sharing, AI services, broadcast). If any
+    // step above threw and was caught, we still got here — that's
+    // acceptable because the user has *active* state and re-triggering
+    // would just stack timers. Cancel-and-retry path goes through
+    // cancelSOS → triggerSOS, which clears state.
+    lastSOSTriggerRef.current = Date.now();
   }, [currentLocation, sosHistory, emergencyContacts, sosMessage, settings]);
 
   const cancelSOS = useCallback(async (): Promise<void> => {
     setIsSOSActive(false);
     setSirenActive(false);
     setIsRecording(false);
+    // Allow immediate retry after a manual cancel
+    lastSOSTriggerRef.current = 0;
 
     try {
       const aiResult = await SafetyAIService.deactivateSOSServices();
-      console.log('[SOS] AI services deactivated:', aiResult);
+      Logger.log('[SOS] AI services deactivated:', aiResult);
     } catch (e) {
-      console.error('[SOS] AI deactivation error:', e);
+      Logger.error('[SOS] AI deactivation error:', e);
     }
 
     try {
       await BackgroundLocationService.deactivateSOSMode();
-      console.log('[SOS] Background location reverted to normal mode');
+      Logger.log('[SOS] Background location reverted to normal mode');
     } catch (e) {
-      console.error('[SOS] Background location deactivation error:', e);
+      Logger.error('[SOS] Background location deactivation error:', e);
     }
 
     try {
@@ -648,21 +670,21 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         await LiveLocationSharingService.endSession();
         setLiveShareSession(null);
         setIsLiveSharing(false);
-        console.log('[SOS] Live sharing session ended');
+        Logger.log('[SOS] Live sharing session ended');
       }
     } catch (e) {
-      console.error('[SOS] Live sharing stop error:', e);
+      Logger.error('[SOS] Live sharing stop error:', e);
     }
 
     if (locationWatcherRef.current) {
       stopLiveLocationTracking(locationWatcherRef.current);
       locationWatcherRef.current = null;
       setIsLiveTracking(false);
-      console.log('[SOS] Live location tracking stopped');
+      Logger.log('[SOS] Live location tracking stopped');
     }
 
     OfflineLocationService.stopLiveSOSBroadcast();
-    console.log('[SOS] Nearby broadcast stopped');
+    Logger.log('[SOS] Nearby broadcast stopped');
 
     if (locationUpdateTimerRef.current) {
       clearInterval(locationUpdateTimerRef.current);
@@ -765,9 +787,9 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         }
       );
       journeyLocationRef.current = sub;
-      console.log('[Journey] Breadcrumb tracking started (5s interval)');
+      Logger.log('[Journey] Breadcrumb tracking started (5s interval)');
     } catch (e) {
-      console.error('[Journey] Breadcrumb tracking failed:', e);
+      Logger.error('[Journey] Breadcrumb tracking failed:', e);
     }
   };
 
@@ -775,7 +797,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
     if (journeyLocationRef.current) {
       journeyLocationRef.current.remove();
       journeyLocationRef.current = null;
-      console.log('[Journey] Breadcrumb tracking stopped');
+      Logger.log('[Journey] Breadcrumb tracking stopped');
     }
     setIsDeviceMoving(false);
     lastBreadcrumbRef.current = null;
@@ -882,7 +904,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
         return session as LiveShareSession;
       }
     } catch (e) {
-      console.error('[LiveShare] Start error:', e);
+      Logger.error('[LiveShare] Start error:', e);
     }
     return null;
   };
@@ -893,7 +915,7 @@ export const EmergencyProvider: React.FC<EmergencyProviderProps> = ({ children }
       setLiveShareSession(null);
       setIsLiveSharing(false);
     } catch (e) {
-      console.error('[LiveShare] Stop error:', e);
+      Logger.error('[LiveShare] Stop error:', e);
     }
   };
 

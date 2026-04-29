@@ -3,6 +3,7 @@
  */
 import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Logger from '../utils/logger';
 
 // ── Types ────────────────────────────────────────────────────────
 interface SessionData {
@@ -97,7 +98,7 @@ const getDB = async (): Promise<FirebaseDBHelpers | null> => {
     _db = { getDatabase, ref, set, get, update, remove, onValue, app };
     return _db;
   } catch (e) {
-    console.error('[LiveShare] Firebase import error:', e);
+    Logger.error('[LiveShare] Firebase import error:', e);
     return null;
   }
 };
@@ -160,7 +161,7 @@ const LiveLocationSharingService = {
         expiresAt,
       };
     } catch (e: any) {
-      console.error('[LiveShare] Start session error:', e);
+      Logger.error('[LiveShare] Start session error:', e);
       return { success: false, error: e.message };
     }
   },
@@ -203,7 +204,7 @@ const LiveLocationSharingService = {
         });
       }
     } catch (e) {
-      console.error('[LiveShare] Update error:', e);
+      Logger.error('[LiveShare] Update error:', e);
     }
   },
 
@@ -233,7 +234,7 @@ const LiveLocationSharingService = {
       _isSharing = false;
       return { success: true, sessionId: stoppedId };
     } catch (e: any) {
-      console.error('[LiveShare] Stop error:', e);
+      Logger.error('[LiveShare] Stop error:', e);
       return { success: false, error: e.message };
     }
   },

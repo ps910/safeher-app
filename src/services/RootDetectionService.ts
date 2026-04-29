@@ -3,6 +3,7 @@
  */
 import { Platform, Alert, NativeModules } from 'react-native';
 import * as FileSystem from 'expo-file-system';
+import Logger from '../utils/logger';
 
 // ── Types ────────────────────────────────────────────────────────
 interface DetectionResult {
@@ -77,7 +78,7 @@ class RootDetectionService {
         return true;
       }
     } catch (e) {
-      if (__DEV__) console.log('[RootDetection] Check error:', e);
+      if (__DEV__) Logger.log('[RootDetection] Check error:', e);
     }
     return false;
   }

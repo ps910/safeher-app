@@ -9,6 +9,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import Logger from '../utils/logger';
 
 const BACKGROUND_LOCATION_TASK = 'SAFEHER_BACKGROUND_LOCATION';
 const STORAGE_KEY = '@gs_background_locations';
@@ -47,10 +48,11 @@ let _locationCallback: ((locations: Location.LocationObject[]) => void) | null =
 let _isTracking = false;
 let _sosActive = false;
 
-// ─── Define the background task ──────────────────────────────────
+// ─── Define the background task (guard against repeat registration on hot-reload) ───
+if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: TaskManager.TaskManagerTaskBody<{ locations: Location.LocationObject[] }>) => {
   if (error) {
-    console.error('[BG Location] Task error:', error);
+    Logger.error('[BG Location] Task error:', error);
     return;
   }
 
@@ -58,7 +60,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: TaskMan
     const { locations } = data;
     if (locations && locations.length > 0) {
       const latest = locations[locations.length - 1];
-      console.log('[BG Location] Update:', {
+      Logger.log('[BG Location] Update:', {
         lat: latest.coords.latitude.toFixed(6),
         lng: latest.coords.longitude.toFixed(6),
         accuracy: Math.round(latest.coords.accuracy ?? 0),
@@ -87,19 +89,20 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: TaskMan
 
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
       } catch (e) {
-        console.error('[BG Location] Storage error:', e);
+        Logger.error('[BG Location] Storage error:', e);
       }
 
       if (_locationCallback) {
         try {
           _locationCallback(locations);
         } catch (e) {
-          console.error('[BG Location] Callback error:', e);
+          Logger.error('[BG Location] Callback error:', e);
         }
       }
     }
   }
 });
+}
 
 // ─── Public API ──────────────────────────────────────────────────
 const BackgroundLocationService = {
@@ -107,19 +110,19 @@ const BackgroundLocationService = {
     try {
       const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
       if (fgStatus !== 'granted') {
-        console.log('[BG Location] Foreground permission denied');
+        Logger.log('[BG Location] Foreground permission denied');
         return { foreground: false, background: false };
       }
 
       const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
       if (bgStatus !== 'granted') {
-        console.log('[BG Location] Background permission denied');
+        Logger.log('[BG Location] Background permission denied');
         return { foreground: true, background: false };
       }
 
       return { foreground: true, background: true };
     } catch (e) {
-      console.error('[BG Location] Permission error:', e);
+      Logger.error('[BG Location] Permission error:', e);
       return { foreground: false, background: false };
     }
   },
@@ -175,10 +178,10 @@ const BackgroundLocationService = {
       await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, config);
       _isTracking = true;
 
-      console.log(`[BG Location] Started (mode: ${sosMode ? 'SOS' : 'normal'})`);
+      Logger.log(`[BG Location] Started (mode: ${sosMode ? 'SOS' : 'normal'})`);
       return { success: true, mode: sosMode ? 'sos' : 'normal', backgroundPermission: perms.background };
     } catch (e: any) {
-      console.error('[BG Location] Start error:', e);
+      Logger.error('[BG Location] Start error:', e);
       return { success: false, error: e.message };
     }
   },
@@ -201,10 +204,10 @@ const BackgroundLocationService = {
       _isTracking = false;
       _locationCallback = null;
       _sosActive = false;
-      console.log('[BG Location] Stopped');
+      Logger.log('[BG Location] Stopped');
       return { success: true };
     } catch (e: any) {
-      console.error('[BG Location] Stop error:', e);
+      Logger.error('[BG Location] Stop error:', e);
       return { success: false, error: e.message };
     }
   },
@@ -222,7 +225,7 @@ const BackgroundLocationService = {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       return stored ? JSON.parse(stored) : [];
     } catch (e) {
-      console.error('[BG Location] History read error:', e);
+      Logger.error('[BG Location] History read error:', e);
       return [];
     }
   },

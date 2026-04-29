@@ -295,8 +295,20 @@ async function retryWrite(tableName: string, data: any, retries = MAX_RETRIES): 
 
 // ── Helpers ──────────────────────────────────────────────────────
 function generateId(): string {
+  // 128 bits of CSPRNG entropy → near-zero collision risk.
+  // Falls back to Date.now()+Math.random() only if expo-crypto is unavailable.
+  try {
+    const bytes = (Crypto as any).getRandomBytes
+      ? (Crypto as any).getRandomBytes(16)
+      : null;
+    if (bytes && bytes.length === 16) {
+      let hex = '';
+      for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+      return `${Date.now().toString(36)}-${hex}`;
+    }
+  } catch {}
   const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).substr(2, 8);
+  const rand = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
   return `${ts}-${rand}`;
 }
 
@@ -368,6 +380,20 @@ function lookupIndex(tableName: string, field: string, value: string): number[] 
 }
 
 // ── USER TABLE ───────────────────────────────────────────────────
+//
+// Security: deviceId is the Firebase auth.uid whenever a user is signed in.
+// This ties RTDB writes to authenticated identities and lets the database
+// rules enforce `auth.uid === $uid`. We fall back to a CSPRNG-generated id
+// only for the brief window before sign-in completes (read-only flows).
+async function getAuthUid(): Promise<string | null> {
+  try {
+    const { getAuth } = await import('firebase/auth');
+    return getAuth().currentUser?.uid ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const UserDB = {
   async get(): Promise<UserRecord | null> {
     return await cacheGet<UserRecord>(TABLES.USER, false);
@@ -390,9 +416,18 @@ export const UserDB = {
   },
 
   async getDeviceId(): Promise<string> {
+    const uid = await getAuthUid();
+    if (uid) {
+      const user = await this.get();
+      if (!user || user.deviceId !== uid) {
+        await this.save({ deviceId: uid });
+      }
+      return uid;
+    }
+    // Pre-auth fallback only — never written to the cloud under this id.
     let user = await this.get();
     if (!user || !user.deviceId) {
-      const deviceId = generateId() + '-' + Platform.OS;
+      const deviceId = `local-${generateId()}-${Platform.OS}`;
       user = await this.save({ deviceId });
     }
     return user!.deviceId!;

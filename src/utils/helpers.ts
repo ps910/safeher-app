@@ -6,10 +6,10 @@
  */
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
-import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import * as SMS from 'expo-sms';
 import { Alert, Platform, Vibration } from 'react-native';
+import Logger from './logger';
 import {
   getEmergencyNumbers,
   getDisplayHelplines,
@@ -101,7 +101,7 @@ export const makePhoneCall = async (phoneNumber: string): Promise<void> => {
       Alert.alert('Error', 'Phone calls are not supported on this device');
     }
   } catch (error) {
-    console.error('Error making phone call:', error);
+    Logger.error('Error making phone call:', error);
     Alert.alert('Error', 'Failed to make phone call');
   }
 };
@@ -123,7 +123,7 @@ export const sendSMS = async (phoneNumber: string | string[], message: string): 
       return true;
     }
   } catch (error) {
-    console.error('Error sending SMS:', error);
+    Logger.error('Error sending SMS:', error);
     return false;
   }
 };
@@ -166,8 +166,8 @@ export const sendSOSToContacts = async (
   }
 
   const isOnline = await checkNetworkStatus();
-  console.log(`[SOS] Network status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
-  console.log(`[SOS] Sending to ${phoneNumbers.length} contacts`);
+  Logger.log(`[SOS] Network status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+  Logger.log(`[SOS] Sending to ${phoneNumbers.length} contacts`);
 
   const failedContacts: string[] = [];
 
@@ -175,34 +175,40 @@ export const sendSOSToContacts = async (
   try {
     const smsAvailable = await SMS.isAvailableAsync();
     if (smsAvailable) {
-      console.log('[SOS] Using expo-sms to send to all contacts at once');
       const { result } = await SMS.sendSMSAsync(phoneNumbers, fullMessage);
-      console.log(`[SOS] SMS result: ${result}`);
-
-      const success = result === 'sent' || result === 'unknown';
+      // 'unknown' means the SMS app accepted the intent but did NOT confirm
+      // delivery. In an emergency we cannot treat that as success — we
+      // surface a warning so the user retries or calls directly.
+      const confirmed = result === 'sent';
       if (result === 'cancelled') {
         Alert.alert(
           '⚠️ SOS Not Sent',
           'SMS was cancelled. Your emergency contacts were NOT alerted. Please try again or call emergency services directly.',
-          [{ text: 'OK', style: 'destructive' }]
+          [{ text: 'OK', style: 'destructive' }],
+        );
+      } else if (result === 'unknown') {
+        Alert.alert(
+          '⚠️ SMS Delivery Unconfirmed',
+          'The system could not confirm SMS delivery. Verify with a contact or call emergency services to be safe.',
+          [{ text: 'OK' }],
         );
       }
       return {
-        success,
+        success: confirmed,
         method: 'sms',
         result,
         isOnline,
         contactCount: phoneNumbers.length,
-        failedContacts: result === 'cancelled' ? phoneNumbers : [],
+        failedContacts: result === 'sent' ? [] : phoneNumbers,
       };
     }
   } catch (e) {
-    console.error('[SOS] expo-sms failed:', e);
+    Logger.error('[SOS] expo-sms failed:', e);
   }
 
   // Method 2: Fallback — SMS intent via Linking
   try {
-    console.log('[SOS] Falling back to SMS intent via Linking');
+    Logger.log('[SOS] Falling back to SMS intent via Linking');
     const numbers = phoneNumbers.join(',');
     const url = Platform.select({
       ios: `sms:${numbers}&body=${encodeURIComponent(fullMessage)}`,
@@ -217,13 +223,13 @@ export const sendSOSToContacts = async (
       failedContacts: [],
     };
   } catch (e) {
-    console.error('[SOS] SMS intent failed:', e);
+    Logger.error('[SOS] SMS intent failed:', e);
   }
 
-  // Method 3: Last resort — individual SMS
-  console.log('[SOS] Sending SMS to each contact individually');
+  // Method 3: Last resort — individual SMS, fired in parallel so an
+  // emergency isn't gated by an 800 ms delay × N contacts.
   let sentCount = 0;
-  for (const number of phoneNumbers) {
+  await Promise.all(phoneNumbers.map(async (number) => {
     try {
       const url = Platform.select({
         ios: `sms:${number}&body=${encodeURIComponent(fullMessage)}`,
@@ -231,12 +237,11 @@ export const sendSOSToContacts = async (
       });
       if (url) await Linking.openURL(url);
       sentCount++;
-      await new Promise<void>(r => setTimeout(r, 800));
     } catch (e) {
-      console.error(`[SOS] Failed for ${number}:`, e);
+      Logger.error(`[SOS] Failed for ${number}:`, e);
       failedContacts.push(number);
     }
-  }
+  }));
 
   if (failedContacts.length > 0) {
     const failedNames = contacts
@@ -288,9 +293,9 @@ export const sendLiveLocationUpdate = async (
       });
       if (url) await Linking.openURL(url);
     }
-    console.log('[SOS] Live location update sent');
+    Logger.log('[SOS] Live location update sent');
   } catch (e) {
-    console.error('[SOS] Live location update failed:', e);
+    Logger.error('[SOS] Live location update failed:', e);
   }
 };
 
@@ -307,7 +312,7 @@ export const requestLocationPermission = async (): Promise<boolean> => {
     }
     return true;
   } catch (error) {
-    console.error('Error requesting location permission:', error);
+    Logger.error('Error requesting location permission:', error);
     return false;
   }
 };
@@ -320,7 +325,7 @@ export const requestBackgroundLocationPermission = async (): Promise<boolean> =>
     const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
     return bgStatus === 'granted';
   } catch (error) {
-    console.error('Error requesting background location permission:', error);
+    Logger.error('Error requesting background location permission:', error);
     return false;
   }
 };
@@ -335,7 +340,7 @@ export const getCurrentPosition = async (): Promise<Location.LocationObject | nu
     });
     return location;
   } catch (error) {
-    console.error('Error getting current position:', error);
+    Logger.error('Error getting current position:', error);
     return null;
   }
 };
@@ -360,10 +365,10 @@ export const startLiveLocationTracking = async (
       }
     );
 
-    console.log('[Location] Live tracking started');
+    Logger.log('[Location] Live tracking started');
     return subscription;
   } catch (error) {
-    console.error('Error starting live location tracking:', error);
+    Logger.error('Error starting live location tracking:', error);
     return null;
   }
 };
@@ -371,7 +376,7 @@ export const startLiveLocationTracking = async (
 export const stopLiveLocationTracking = (subscription: Location.LocationSubscription | null): void => {
   if (subscription) {
     subscription.remove();
-    console.log('[Location] Live tracking stopped');
+    Logger.log('[Location] Live tracking stopped');
   }
 };
 
@@ -398,7 +403,7 @@ export const shareLocation = async (location: LocationData | null): Promise<void
       await Linking.openURL(`sms:?body=${encodeURIComponent(message)}`);
     }
   } catch (error) {
-    console.error('Error sharing location:', error);
+    Logger.error('Error sharing location:', error);
   }
 };
 
@@ -438,20 +443,68 @@ export const getTimeAgo = (dateString: string): string => {
   return `${days}d ago`;
 };
 
-// ─── Panic Wipe — clear all sensitive data ────────────────────────
+// ─── Panic Wipe — clear ALL sensitive data, sign out, drop cloud ──
+//
+// Wipes:
+//   1. SecureStore-backed keys (PIN hashes, encrypted blobs)
+//   2. AsyncStorage keys with @gs_, @girl_safety_, @safeher_db_, enc_ prefixes
+//   3. Firebase auth session (sign-out)
+//   4. The user's RTDB tree at users/{uid} (best-effort, requires auth)
+//
+// Returns true only if every step succeeded.
 export const panicWipe = async (): Promise<boolean> => {
-  const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+  let ok = true;
+
   try {
-    const keys: string[] = await AsyncStorage.getAllKeys();
-    const safetyKeys = keys.filter((k: string) => k.startsWith('@gs_') || k.startsWith('@girl_safety_'));
-    if (safetyKeys.length > 0) {
-      await AsyncStorage.multiRemove(safetyKeys);
-    }
-    return true;
+    const SecureStorageService = (await import('../services/EncryptedStorageService')).default;
+    await SecureStorageService.secureWipe();
   } catch (e) {
-    console.error('Panic wipe error:', e);
-    return false;
+    Logger.error('[panicWipe] SecureStorage wipe failed', e);
+    ok = false;
   }
+
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const keys = await AsyncStorage.getAllKeys();
+    const safetyKeys = keys.filter((k) =>
+      k.startsWith('@gs_') ||
+      k.startsWith('@girl_safety_') ||
+      k.startsWith('@safeher_db_') ||
+      k.startsWith('@safeher_') ||
+      k.startsWith('enc_') ||
+      k.startsWith('@safe_chunked_'),
+    );
+    if (safetyKeys.length > 0) await AsyncStorage.multiRemove(safetyKeys);
+  } catch (e) {
+    Logger.error('[panicWipe] AsyncStorage wipe failed', e);
+    ok = false;
+  }
+
+  // Best-effort cloud wipe (requires the user to still be authenticated)
+  try {
+    const { getAuth } = await import('firebase/auth');
+    const { getDatabase, ref, remove } = await import('firebase/database');
+    const uid = getAuth().currentUser?.uid;
+    if (uid) {
+      const db = getDatabase();
+      await Promise.allSettled([
+        remove(ref(db, `users/${uid}`)),
+        remove(ref(db, `admin/devices/${uid}`)),
+      ]);
+    }
+  } catch (e) {
+    Logger.warn('[panicWipe] Cloud wipe skipped', e);
+  }
+
+  // Final: sign out so a future actor cannot read fresh data with stale token
+  try {
+    const { getAuth, signOut } = await import('firebase/auth');
+    if (getAuth().currentUser) await signOut(getAuth());
+  } catch (e) {
+    Logger.warn('[panicWipe] sign-out skipped', e);
+  }
+
+  return ok;
 };
 
 // ─── Offline SMS SOS ─────────────────────────────────────────────
@@ -474,7 +527,7 @@ export const sendOfflineSMS = async (
       return;
     }
   } catch (e) {
-    console.error('[Offline SMS] expo-sms failed:', e);
+    Logger.error('[Offline SMS] expo-sms failed:', e);
   }
 
   const numbers = phoneNumbers.join(',');
@@ -486,18 +539,35 @@ export const sendOfflineSMS = async (
   try {
     if (url) await Linking.openURL(url);
   } catch (e) {
-    console.error('Offline SMS error:', e);
+    Logger.error('Offline SMS error:', e);
   }
+};
+
+// ─── Country dial-code fallback (no more hardcoded +91) ──────────
+const COUNTRY_DIAL_CODES: Record<string, string> = {
+  IN: '91', US: '1', CA: '1', GB: '44', AU: '61', AE: '971',
+  SG: '65', MY: '60', JP: '81', DE: '49', FR: '33', BR: '55',
+};
+
+const inferDialCode = (): string => {
+  const cc = (detectCountryCode?.() as string | null) || null;
+  if (cc && COUNTRY_DIAL_CODES[cc]) return COUNTRY_DIAL_CODES[cc];
+  return ''; // no guess — user must store contacts in E.164
 };
 
 // ─── WhatsApp Messaging ──────────────────────────────────────────
 export const sendWhatsAppMessage = async (phoneNumber: string, message: string): Promise<WhatsAppResult> => {
   try {
     let cleaned = phoneNumber.replace(/[^0-9+]/g, '');
-    if (!cleaned.startsWith('+')) {
-      if (cleaned.length === 10) cleaned = '91' + cleaned;
-    } else {
-      cleaned = cleaned.replace('+', '');
+    if (cleaned.startsWith('+')) {
+      cleaned = cleaned.slice(1);
+    } else if (cleaned.length <= 11) {
+      // Local number — prepend the user's detected country code.
+      const dial = inferDialCode();
+      if (!dial) {
+        return { success: false, error: 'Phone number must include country code (e.g. +1, +44).' };
+      }
+      cleaned = dial + cleaned;
     }
 
     const whatsappUrl = `whatsapp://send?phone=${cleaned}&text=${encodeURIComponent(message)}`;
@@ -511,7 +581,7 @@ export const sendWhatsAppMessage = async (phoneNumber: string, message: string):
     await Linking.openURL(webUrl);
     return { success: true, method: 'whatsapp_web' };
   } catch (e: any) {
-    console.error('[WhatsApp] Send failed:', e);
+    Logger.error('[WhatsApp] Send failed:', e);
     return { success: false, error: e.message };
   }
 };
@@ -530,7 +600,7 @@ export const sendWhatsAppToContacts = async (
       if (result.success) sentCount++;
       await new Promise<void>(r => setTimeout(r, 1000));
     } catch (e) {
-      console.error(`[WhatsApp] Failed for ${contact.name}:`, e);
+      Logger.error(`[WhatsApp] Failed for ${contact.name}:`, e);
     }
   }
 
@@ -613,7 +683,7 @@ export const shareJourneySOSToContacts = async (
       const waResult = await sendWhatsAppToContacts(tier1, message);
       results.whatsapp = waResult.success;
     } catch (e) {
-      console.error('[Journey SOS] WhatsApp failed:', e);
+      Logger.error('[Journey SOS] WhatsApp failed:', e);
     }
   }
 
@@ -621,7 +691,7 @@ export const shareJourneySOSToContacts = async (
     const smsResult = await sendSOSToContacts(contacts, message, location);
     results.sms = smsResult.success;
   } catch (e) {
-    console.error('[Journey SOS] SMS failed:', e);
+    Logger.error('[Journey SOS] SMS failed:', e);
   }
 
   return {

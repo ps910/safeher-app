@@ -174,6 +174,7 @@ export interface AuthContextValue {
   firebaseUser: any; // Firebase User type
   pin: string | null;
   duressPin: string | null;
+  hasPin: boolean;
   hasDuressPin: boolean;
   biometricEnabled: boolean;
   isDuressMode: boolean;
@@ -194,7 +195,7 @@ export interface AuthContextValue {
   setIsDuressMode: (val: boolean) => void;
   setupPin: (pin: string) => Promise<void>;
   setupDuressPin: (pin: string) => Promise<void>;
-  verifyPin: (entered: string) => 'normal' | 'duress' | false;
+  verifyPin: (entered: string) => Promise<'normal' | 'duress' | false>;
   toggleBiometric: (val: boolean) => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   markProfileComplete: () => Promise<void>;

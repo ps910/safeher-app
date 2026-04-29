@@ -1,25 +1,52 @@
 {
   "rules": {
+    ".read": false,
+    ".write": false,
+
     "users": {
-      "$deviceId": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+      "$uid": {
+        ".read":  "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+
+        "sos_events": {
+          "$eventId": {
+            ".validate": "newData.hasChildren(['_syncedAt']) && (!newData.hasChild('latitude') || (newData.child('latitude').isNumber() && newData.child('latitude').val() >= -90 && newData.child('latitude').val() <= 90)) && (!newData.hasChild('longitude') || (newData.child('longitude').isNumber() && newData.child('longitude').val() >= -180 && newData.child('longitude').val() <= 180))"
+          }
+        },
+
+        "profile": {
+          ".validate": "newData.hasChildren()"
+        }
       }
     },
+
     "admin": {
-      ".read": "auth != null && auth.token.admin === true",
-      ".write": "auth != null",
+      ".read":  "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true",
+
       "active_sos": {
-        ".read": "auth != null"
+        "$eventId": {
+          ".write": "auth != null && (auth.token.admin === true || newData.child('_uid').val() === auth.uid)"
+        }
       },
+
+      "devices": {
+        "$uid": {
+          ".write": "auth != null && (auth.token.admin === true || $uid === auth.uid)"
+        }
+      },
+
       "statistics": {
-        ".read": "auth != null"
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": "auth != null && auth.token.admin === true"
       }
     },
+
     "live_tracking": {
       "$sessionId": {
-        ".read": true,
-        ".write": "auth != null"
+        ".read":  "auth != null || (data.exists() && data.child('isActive').val() === true && now < data.child('expiresAt').val())",
+        ".write": "auth != null && (!data.exists() || data.child('ownerUid').val() === auth.uid) && (!newData.exists() || newData.child('ownerUid').val() === auth.uid)",
+        ".validate": "newData.hasChildren(['ownerUid','expiresAt','isActive']) && newData.child('ownerUid').val() === auth.uid && newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() > now && newData.child('expiresAt').val() < now + 86400000"
       }
     }
   }

@@ -161,12 +161,19 @@ function AppInner({ modules }) {
   }, []);
 
   const checkOnboarding = async () => {
-    try {
-      const done = await isOnboardingComplete();
-      setOnboardingDone(done);
-    } catch (e) {
-      setOnboardingDone(true); // Skip if error
+    // Retry once before giving up. If both reads fail, fail CLOSED:
+    // we'd rather block on a re-read than skip onboarding (which
+    // would expose an un-set-up app to a brand-new device).
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const done = await isOnboardingComplete();
+        setOnboardingDone(done);
+        return;
+      } catch (e) {
+        if (attempt === 0) await new Promise(r => setTimeout(r, 250));
+      }
     }
+    setOnboardingDone(false);
   };
 
   // Check security setup status after authentication
@@ -179,12 +186,19 @@ function AppInner({ modules }) {
   }, [isAuthenticated]);
 
   const checkSecuritySetup = async () => {
-    try {
-      const done = await isSecuritySetupComplete(pin);
-      setSecuritySetupDone(done);
-    } catch {
-      setSecuritySetupDone(true); // Skip if error
+    // Retry once. If reads keep failing, fail CLOSED — we route the
+    // user back through SecuritySetup rather than skipping straight
+    // into the unprotected app.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const done = await isSecuritySetupComplete(pin);
+        setSecuritySetupDone(done);
+        return;
+      } catch {
+        if (attempt === 0) await new Promise(r => setTimeout(r, 250));
+      }
     }
+    setSecuritySetupDone(false);
   };
 
   // App state change — lock on background (security)

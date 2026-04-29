@@ -11,6 +11,7 @@ import CloudSyncService from './CloudSyncService';
 import { Platform } from 'react-native';
 
 import type { EmergencyContact, LocationData } from '../types';
+import Logger from '../utils/logger';
 
 // ── Types ────────────────────────────────────────────────────────
 interface SOSShareResult {
@@ -84,7 +85,7 @@ class OfflineLocationServiceClass {
         } catch {}
       }, 30000);
     } catch (e) {
-      console.log('OfflineLocationService init error:', e);
+      Logger.log('OfflineLocationService init error:', e);
     }
   }
 
@@ -115,7 +116,7 @@ class OfflineLocationServiceClass {
       });
       await this.saveLocation(loc, 'tracking');
     } catch (e) {
-      console.log('Initial location error:', e);
+      Logger.log('Initial location error:', e);
     }
 
     this.trackingInterval = setInterval(async () => {
@@ -126,7 +127,7 @@ class OfflineLocationServiceClass {
         await this.saveLocation(loc, 'tracking');
         this.notifyListeners({ type: 'location_update', location: loc });
       } catch (e) {
-        console.log('Tracking location error:', e);
+        Logger.log('Tracking location error:', e);
       }
     }, intervalMs);
 
@@ -177,7 +178,7 @@ class OfflineLocationServiceClass {
       await this.registerAsNearbyUser(location);
       return entry;
     } catch (e) {
-      console.log('Save location error:', e);
+      Logger.log('Save location error:', e);
       return null;
     }
   }
@@ -282,11 +283,11 @@ class OfflineLocationServiceClass {
           isMoving,
         });
       } catch (e) {
-        console.log('[SOS Broadcast] Location update error:', e);
+        Logger.log('[SOS Broadcast] Location update error:', e);
       }
     }, 5000);
 
-    console.log('[SOS Broadcast] Started live broadcast for alert:', alertId);
+    Logger.log('[SOS Broadcast] Started live broadcast for alert:', alertId);
   }
 
   stopLiveSOSBroadcast(): void {
@@ -300,7 +301,7 @@ class OfflineLocationServiceClass {
     this.activeSOSAlertId = null;
     this.prevSOSLat = null;
     this.prevSOSLon = null;
-    console.log('[SOS Broadcast] Stopped');
+    Logger.log('[SOS Broadcast] Stopped');
   }
 
   // Internal haversine for meters
@@ -326,7 +327,7 @@ class OfflineLocationServiceClass {
         platform: Platform.OS,
       });
     } catch (e) {
-      console.log('Register nearby error:', e);
+      Logger.log('Register nearby error:', e);
     }
   }
 
@@ -372,7 +373,7 @@ class OfflineLocationServiceClass {
     if (!this.isOnline) return;
 
     try {
-      CloudSyncService.syncAll().catch((e: Error) => console.log('[Sync] Cloud sync error:', e));
+      CloudSyncService.syncAll().catch((e: Error) => Logger.log('[Sync] Cloud sync error:', e));
 
       const pendingActions = await OfflineQueueDB.getPending();
 
@@ -427,7 +428,7 @@ class OfflineLocationServiceClass {
       await OfflineQueueDB.clearCompleted();
       this.notifyListeners({ type: 'sync_complete' });
     } catch (e) {
-      console.log('Sync error:', e);
+      Logger.log('Sync error:', e);
     }
   }
 

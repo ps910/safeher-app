@@ -1,14 +1,17 @@
 /**
  * CloudSyncService — TypeScript — Firebase RTDB sync for SafeHer
  */
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { getApps, FirebaseApp } from 'firebase/app';
 import {
-  getDatabase, ref, set, push, update, get, onValue,
-  serverTimestamp, query, orderByChild, limitToLast,
-  Database as FirebaseDB, DatabaseReference,
+  getDatabase, ref, set, push, update, get,
+  Database as FirebaseDB,
 } from 'firebase/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import Logger from '../utils/logger';
+// Reuse the already-initialized app from src/config/firebase.js so we
+// don't duplicate config (drift risk) and don't initialize twice.
+import '../config/firebase';
 
 // ── Types ────────────────────────────────────────────────────────
 interface SyncStats {
@@ -65,18 +68,6 @@ interface AdminSOSEvent {
   [key: string]: any;
 }
 
-// ── Firebase Config ──────────────────────────────────────────────
-const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyBAVga_tZD7cs2NmB0SKbrAjjdYid_osOU',
-  authDomain: 'safeher-app-242a1.firebaseapp.com',
-  databaseURL: 'https://safeher-app-242a1-default-rtdb.asia-southeast1.firebasedatabase.app',
-  projectId: 'safeher-app-242a1',
-  storageBucket: 'safeher-app-242a1.firebasestorage.app',
-  messagingSenderId: '684405408737',
-  appId: '1:684405408737:web:236fc2dadc5151c9cac8a0',
-  measurementId: 'G-XVCHZK88WL',
-};
-
 const SYNC_INTERVAL_MS = 60000;
 const MAX_BATCH_SIZE = 50;
 const CLOUD_SYNC_KEY = '@safeher_cloud_sync_enabled';
@@ -104,27 +95,23 @@ class CloudSyncServiceClass {
       if (lastSync) this.lastSyncTime = new Date(lastSync);
     } catch {}
 
-    if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.databaseURL) {
-      console.log('[CloudSync] Firebase not configured — running in local-only mode');
-      return false;
-    }
-
     try {
-      if (getApps().length === 0) {
-        this.app = initializeApp(FIREBASE_CONFIG);
-      } else {
-        this.app = getApps()[0];
+      const apps = getApps();
+      if (apps.length === 0) {
+        Logger.error('[CloudSync] Firebase app not initialized in src/config/firebase');
+        return false;
       }
+      this.app = apps[0];
       this.db = getDatabase(this.app);
       this.isInitialized = true;
-      console.log('[CloudSync] ✅ Firebase initialized');
+      Logger.log('[CloudSync] ✅ Firebase initialized');
 
       if (this.isEnabled) {
         this.startPeriodicSync();
       }
       return true;
     } catch (e) {
-      console.error('[CloudSync] Firebase init error:', e);
+      Logger.error('[CloudSync] Firebase init error:', e);
       return false;
     }
   }
@@ -148,10 +135,10 @@ class CloudSyncServiceClass {
     if (this.syncInterval) return;
     this.syncInterval = setInterval(() => {
       if (this.isEnabled && this.isInitialized) {
-        this.syncAll().catch(e => console.log('[CloudSync] Periodic sync error:', e));
+        this.syncAll().catch(e => Logger.log('[CloudSync] Periodic sync error:', e));
       }
     }, SYNC_INTERVAL_MS);
-    console.log(`[CloudSync] Periodic sync started (every ${SYNC_INTERVAL_MS / 1000}s)`);
+    Logger.log(`[CloudSync] Periodic sync started (every ${SYNC_INTERVAL_MS / 1000}s)`);
   }
 
   stopPeriodicSync(): void {
@@ -211,7 +198,7 @@ class CloudSyncServiceClass {
       synced = batch.length;
       this.syncStats.success += synced;
     } catch (e: any) {
-      console.error(`[CloudSync] Batch sync error for ${collection}:`, e);
+      Logger.error(`[CloudSync] Batch sync error for ${collection}:`, e);
       this.syncStats.failed += batch.length;
       this.syncStats.lastError = e.message;
     }
@@ -247,11 +234,11 @@ class CloudSyncServiceClass {
       const current = snap.exists() ? (snap.val() as number) : 0;
       await set(statsRef, current + 1);
 
-      console.log('[CloudSync] 🚨 SOS event synced to cloud immediately');
+      Logger.log('[CloudSync] 🚨 SOS event synced to cloud immediately');
       this._notify({ type: 'sos_synced', sosId: sosEvent.id });
       return true;
     } catch (e) {
-      console.error('[CloudSync] SOS sync error:', e);
+      Logger.error('[CloudSync] SOS sync error:', e);
       return false;
     }
   }
@@ -339,7 +326,7 @@ class CloudSyncServiceClass {
             await this.syncBatch(col.name, newRecords);
           }
         } catch (e: any) {
-          console.log(`[CloudSync] Skip ${col.name}:`, e.message);
+          Logger.log(`[CloudSync] Skip ${col.name}:`, e.message);
         }
       }
 
@@ -355,10 +342,10 @@ class CloudSyncServiceClass {
       this.lastSyncTime = new Date();
       await AsyncStorage.setItem(LAST_SYNC_KEY, this.lastSyncTime.toISOString());
 
-      console.log(`[CloudSync] ✅ Full sync complete (${this.syncStats.success} records)`);
+      Logger.log(`[CloudSync] ✅ Full sync complete (${this.syncStats.success} records)`);
       this._notify({ type: 'sync_complete', stats: { ...this.syncStats } });
     } catch (e) {
-      console.error('[CloudSync] Full sync error:', e);
+      Logger.error('[CloudSync] Full sync error:', e);
     }
 
     this.isSyncing = false;
@@ -431,7 +418,7 @@ class CloudSyncServiceClass {
       isSyncing: this.isSyncing,
       lastSyncTime: this.lastSyncTime,
       stats: { ...this.syncStats },
-      hasFirebaseConfig: !!FIREBASE_CONFIG.apiKey && !!FIREBASE_CONFIG.databaseURL,
+      hasFirebaseConfig: getApps().length > 0,
     };
   }
 

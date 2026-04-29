@@ -7,6 +7,7 @@ import * as FileSystem from 'expo-file-system';
 const { documentDirectory, EncodingType, writeAsStringAsync, makeDirectoryAsync, moveAsync, copyAsync } = FileSystem as any;
 import * as Haptics from 'expo-haptics';
 import { Platform, Vibration } from 'react-native';
+import Logger from '../utils/logger';
 
 // ── Types ────────────────────────────────────────────────────────
 interface ServiceStatus {
@@ -161,7 +162,7 @@ class SafetyAIServiceClass {
       this.serviceStatus.shake = 'active';
       return true;
     } catch (e) {
-      console.error('[ShakeDetect] Start error:', e);
+      Logger.error('[ShakeDetect] Start error:', e);
       this.serviceStatus.shake = 'error';
       return false;
     }
@@ -245,7 +246,7 @@ class SafetyAIServiceClass {
       this.serviceStatus.scream = 'active';
       return true;
     } catch (e) {
-      console.error('[ScreamDetect] Start error:', e);
+      Logger.error('[ScreamDetect] Start error:', e);
       this.serviceStatus.scream = 'error';
       return false;
     }
@@ -298,7 +299,7 @@ class SafetyAIServiceClass {
       this._notify({ type: 'siren_started', timestamp: new Date().toISOString() });
       return true;
     } catch (e) {
-      console.error('[Siren] Start error:', e);
+      Logger.error('[Siren] Start error:', e);
       Vibration.vibrate([0, 1000, 200, 1000, 200, 1000], true);
       this.isSirenPlaying = true;
       this.serviceStatus.siren = 'vibration_only';
@@ -420,7 +421,7 @@ class SafetyAIServiceClass {
       this._notify({ type: 'recording_started', timestamp: new Date().toISOString() });
       return recording;
     } catch (e) {
-      console.error('[EvidenceRec] Start error:', e);
+      Logger.error('[EvidenceRec] Start error:', e);
       this.serviceStatus.recording = 'error';
       return null;
     }
@@ -454,7 +455,7 @@ class SafetyAIServiceClass {
         return { uri: uri || '', fileName: 'recording.m4a', duration: 'unknown', type: 'audio' };
       }
     } catch (e) {
-      console.error('[EvidenceRec] Stop error:', e);
+      Logger.error('[EvidenceRec] Stop error:', e);
       this.isRecordingEvidence = false;
       this.serviceStatus.recording = 'error';
       return null;

@@ -25,6 +25,7 @@ import {
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as WebBrowser          from 'expo-web-browser';
+import * as Crypto              from 'expo-crypto';
 
 // Native Firebase Auth (required for phone OTP on Android/iOS)
 let nativeFirebaseAuth = null;
@@ -340,14 +341,30 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
   };
 
   const handleApple = () => run('apple', async () => {
+    // Apple Sign-In requires an unhashed nonce we generate, then we hash
+    // it and pass the hash to Apple. Firebase verifies that
+    // SHA-256(rawNonce) === nonce claim in the returned ID token.
+    const rawNonce = await (async () => {
+      const bytes = await Crypto.getRandomBytesAsync(16);
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    })();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
+
     const cred = await AppleAuthentication.signInAsync({
       requestedScopes: [
         AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
         AppleAuthentication.AppleAuthenticationScope.EMAIL,
       ],
+      nonce: hashedNonce,
     });
     const provider = new OAuthProvider('apple.com');
-    const firebaseCred = provider.credential({ idToken: cred.identityToken, rawNonce: cred.authorizationCode });
+    const firebaseCred = provider.credential({
+      idToken: cred.identityToken,
+      rawNonce, // unhashed — Firebase will hash and compare
+    });
     await signInWithCredential(auth, firebaseCred);
     await authenticate('apple');
   });
@@ -368,12 +385,21 @@ function HomeView({ goTo, run, loadingKey, authenticate, showError, biometricEna
 
   const handleQuickStart = () => {
     Alert.alert(
-      '⚡ Quick Start',
-      'You will be signed in as a guest. Data will not be saved if you uninstall. Continue?',
+      '⚡ Quick Start (Limited Mode)',
+      'Guest mode runs locally only — emergency contacts, evidence, and journey history will NOT sync to the cloud and will be lost if you uninstall.\n\nFor full safety features (cloud SOS routing, overdue-journey alerts, multi-device sync) please create a real account.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', onPress: () => run('quick', async () => { await signInAnonymously(auth); await authenticate('anonymous'); }) },
-      ]
+        {
+          text: 'Continue as Guest',
+          onPress: () => run('quick', async () => {
+            // Anonymous sign-in only — anonymous accounts hit RTDB rules
+            // that scope reads/writes to auth.uid, so they can't see
+            // other users' data even if they wanted to.
+            await signInAnonymously(auth);
+            await authenticate('anonymous');
+          }),
+        },
+      ],
     );
   };
 
