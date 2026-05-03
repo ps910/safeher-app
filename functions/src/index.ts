@@ -72,7 +72,7 @@ async function checkRateLimit(uid: string, kind: string): Promise<boolean> {
 // ═══════════════════════════════════════════════════════════════════
 export const onSOSTriggered = functions.database
   .ref("/users/{uid}/sos_events/{eventId}")
-  .onCreate(async (snapshot, context) => {
+  .onCreate(async (snapshot: any, context: any) => {
     const sosData = snapshot.val() as SOSEvent;
     const { uid, eventId } = context.params;
 
@@ -147,7 +147,7 @@ export const checkOverdueJourneys = functions.pubsub
 
     const promises: Promise<unknown>[] = [];
 
-    overdueSnap.forEach((child) => {
+    overdueSnap.forEach((child: any) => {
       const journey = child.val() as JourneyRecord;
       const journeyId = child.key!;
       if (journey.status !== "active") return false;
@@ -185,7 +185,7 @@ export const checkOverdueJourneys = functions.pubsub
                 priority: "high",
                 notification: { channelId: "sos_channel", priority: "max", sound: "default" },
               },
-            }).catch((e) => functions.logger.error("Push send failed", e)),
+            }).catch((e: unknown) => functions.logger.error("Push send failed", e)),
           );
         }
       }
@@ -201,7 +201,7 @@ export const checkOverdueJourneys = functions.pubsub
 // ═══════════════════════════════════════════════════════════════════
 export const sendEmergencyPush = functions
   .runWith({ enforceAppCheck: true })
-  .https.onCall(async (data: any, context) => {
+  .https.onCall(async (data: any, context: any) => {
     if (!context.auth) {
       throw new functions.https.HttpsError("unauthenticated", "Sign in required.");
     }
@@ -293,7 +293,7 @@ export const cleanupOldAlerts = functions.pubsub
       .limitToFirst(1000)
       .once("value");
     const sosUpdates: Record<string, null> = {};
-    oldSosSnap.forEach((c) => {
+    oldSosSnap.forEach((c: any) => {
       const v = c.val() as { status?: string };
       if (v.status === "RESOLVED") sosUpdates[`admin/active_sos/${c.key}`] = null;
       return false;
@@ -310,7 +310,7 @@ export const cleanupOldAlerts = functions.pubsub
       .limitToFirst(1000)
       .once("value");
     const journeyUpdates: Record<string, null> = {};
-    oldJourneysSnap.forEach((c) => {
+    oldJourneysSnap.forEach((c: any) => {
       journeyUpdates[`admin/overdue_journeys/${c.key}`] = null;
       return false;
     });
@@ -326,7 +326,7 @@ export const cleanupOldAlerts = functions.pubsub
       .limitToFirst(1000)
       .once("value");
     const liveUpdates: Record<string, null> = {};
-    liveSnap.forEach((c) => { liveUpdates[`live_tracking/${c.key}`] = null; return false; });
+    liveSnap.forEach((c: any) => { liveUpdates[`live_tracking/${c.key}`] = null; return false; });
     if (Object.keys(liveUpdates).length > 0) {
       await db.ref().update(liveUpdates);
       functions.logger.info(`Cleaned ${Object.keys(liveUpdates).length} expired live sessions`);
@@ -340,7 +340,7 @@ export const cleanupOldAlerts = functions.pubsub
 // ═══════════════════════════════════════════════════════════════════
 export const onNewDevice = functions.database
   .ref("/admin/devices/{uid}")
-  .onWrite(async (change) => {
+  .onWrite(async (change: any) => {
     if (!change.before.exists() && change.after.exists()) {
       await db.ref("admin/statistics/total_devices")
         .transaction((current: number | null) => (current || 0) + 1);

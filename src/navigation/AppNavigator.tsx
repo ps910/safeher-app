@@ -1,16 +1,14 @@
 /**
- * App Navigator v6.0 - Bottom Tabs + Stack screens for all features
- * Supports dark mode via useTheme hook
- *
+ * App Navigator v7.0 — Dark luxury bottom tabs + stack
  * TypeScript — type-safe navigation params
  */
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
-import { COLORS, useTheme } from '../constants/theme';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { useEmergency } from '../context/EmergencyContext';
+import { T } from '../components/ui';
 
 import type { RootStackParamList, TabParamList } from '../types';
 
@@ -32,55 +30,55 @@ import HiddenCameraScreen from '../screens/HiddenCameraScreen';
 const Tab = createBottomTabNavigator<TabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const getTabIcon = (routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap => {
-  const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
-    Home: focused ? 'shield-checkmark' : 'shield-checkmark-outline',
-    Contacts: focused ? 'people' : 'people-outline',
-    Location: focused ? 'location' : 'location-outline',
-    Tips: focused ? 'book' : 'book-outline',
-  };
-  return icons[routeName] || 'ellipse';
+const TAB_ICONS: Record<string, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
+  Home:     ['shield-checkmark', 'shield-checkmark-outline'],
+  Contacts: ['people',           'people-outline'],
+  Location: ['location',         'location-outline'],
+  Tips:     ['bulb',             'bulb-outline'],
 };
+
+function CustomTabIcon({ name, focused, color }: { name: string; focused: boolean; color: string }) {
+  const [active, inactive] = TAB_ICONS[name] || ['ellipse', 'ellipse-outline'];
+  return (
+    <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
+      <Ionicons name={focused ? active : inactive} size={focused ? 22 : 20} color={color} />
+    </View>
+  );
+}
 
 function TabNavigator(): React.JSX.Element {
   const { isSOSActive, stealthMode } = useEmergency();
-  const { colors, isDark } = useTheme();
-
   const homeLabel = stealthMode ? 'Calculator' : 'Home';
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarIcon: ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
-          <Ionicons name={getTabIcon(route.name, focused)} size={size} color={color} />
+        tabBarIcon: ({ focused, color }) => (
+          <CustomTabIcon name={route.name} focused={focused} color={color} />
         ),
-        tabBarActiveTintColor: isSOSActive ? colors.danger : colors.primary,
-        tabBarInactiveTintColor: colors.textLight,
+        tabBarActiveTintColor:   isSOSActive ? T.danger : T.primary,
+        tabBarInactiveTintColor: T.textHint,
         tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopWidth: 0,
-          borderTopColor: 'transparent',
-          height: Platform.OS === 'ios' ? 88 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 22 : 10,
-          paddingTop: 10,
+          backgroundColor: '#0A0A12',
+          borderTopWidth: 1,
+          borderTopColor: T.border,
+          height: Platform.OS === 'ios' ? 88 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+          paddingTop: 8,
           elevation: 24,
           shadowColor: '#000',
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: isDark ? 0.3 : 0.12,
-          shadowRadius: 10,
+          shadowOffset: { width: 0, height: -8 },
+          shadowOpacity: 0.5,
+          shadowRadius: 14,
         },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '700' as const,
-          letterSpacing: 0.2,
-        },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4, marginTop: 2 },
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: homeLabel }} />
-      <Tab.Screen name="Contacts" component={ContactsScreen} options={{ tabBarLabel: 'Contacts' }} />
-      <Tab.Screen name="Location" component={LocationScreen} options={{ tabBarLabel: 'Location' }} />
-      <Tab.Screen name="Tips" component={SafetyTipsScreen} options={{ tabBarLabel: 'Tips' }} />
+      <Tab.Screen name="Home"     component={HomeScreen}        options={{ tabBarLabel: homeLabel }} />
+      <Tab.Screen name="Contacts" component={ContactsScreen}    options={{ tabBarLabel: 'Contacts' }} />
+      <Tab.Screen name="Location" component={LocationScreen}    options={{ tabBarLabel: 'Location' }} />
+      <Tab.Screen name="Tips"     component={SafetyTipsScreen}  options={{ tabBarLabel: 'Tips' }} />
     </Tab.Navigator>
   );
 }
@@ -91,19 +89,30 @@ export default function AppNavigator(): React.JSX.Element {
       screenOptions={{
         headerShown: false,
         animation: 'slide_from_right',
+        contentStyle: { backgroundColor: T.bg },
       }}
     >
-      <Stack.Screen name="MainTabs" component={TabNavigator} />
-      <Stack.Screen name="FakeCall" component={FakeCallScreen} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="SelfDefense" component={SelfDefenseScreen} />
-      <Stack.Screen name="NearbyHelp" component={NearbyHelpScreen} />
-      <Stack.Screen name="Profile" component={ProfileScreen} />
-      <Stack.Screen name="EvidenceVault" component={EvidenceVaultScreen} />
-      <Stack.Screen name="GuardianMode" component={GuardianModeScreen} />
+      <Stack.Screen name="MainTabs"       component={TabNavigator} />
+      <Stack.Screen name="FakeCall"       component={FakeCallScreen} />
+      <Stack.Screen name="Settings"       component={SettingsScreen} />
+      <Stack.Screen name="SelfDefense"    component={SelfDefenseScreen} />
+      <Stack.Screen name="NearbyHelp"     component={NearbyHelpScreen} />
+      <Stack.Screen name="Profile"        component={ProfileScreen} />
+      <Stack.Screen name="EvidenceVault"  component={EvidenceVaultScreen} />
+      <Stack.Screen name="GuardianMode"   component={GuardianModeScreen} />
       <Stack.Screen name="JourneyTracker" component={JourneyTrackerScreen} />
       <Stack.Screen name="IncidentReport" component={IncidentReportScreen} />
-      <Stack.Screen name="HiddenCamera" component={HiddenCameraScreen} />
+      <Stack.Screen name="HiddenCamera"   component={HiddenCameraScreen} />
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  iconWrap: {
+    width: 38, height: 38, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  iconWrapActive: {
+    backgroundColor: 'rgba(255,42,112,0.12)',
+  },
+});

@@ -1,323 +1,226 @@
 /**
- * SelfDefenseScreen - Step-by-step self-defense techniques
- * Practical moves every girl should know to protect herself
+ * SelfDefenseScreen v7.0 — Step-by-step techniques (Dark Luxury)
  */
 import React, { useState } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
-import { COLORS, SHADOWS } from '../constants/theme';
+import { Screen, Header, Card, SectionTitle, T } from '../components/ui';
 
 const TECHNIQUES = [
   {
-    id: '1',
-    title: 'Palm Strike',
+    id: 'palm-strike',
+    name: 'Palm Heel Strike',
     difficulty: 'Beginner',
-    icon: 'hand-left',
-    color: '#4CAF50',
-    target: 'Nose, chin, or throat',
-    description: 'A powerful open-palm strike that can disorient an attacker.',
+    target: 'Nose / chin',
+    icon: 'hand-right',
+    color: T.danger,
+    why: 'Stronger than a fist, no risk of breaking knuckles. Aimed at nose, it momentarily blinds the attacker with tearing.',
     steps: [
-      'Extend your dominant hand with fingers together',
-      'Pull your arm back with elbow bent',
-      'Push forward using your hip and shoulder power',
-      'Strike with the heel of your palm (bottom of palm)',
-      'Aim for the nose, chin, or throat',
-      'Immediately create distance and run',
+      'Open hand, fingers together, thumb tucked.',
+      'Strike up with the heel of your palm.',
+      'Drive through the target — do not pull back early.',
+      'Follow up with a knee strike or run.',
     ],
-    tip: 'A palm strike is safer for your hand than a punch and can be just as effective.',
   },
   {
-    id: '2',
-    title: 'Knee Strike',
+    id: 'knee-strike',
+    name: 'Knee to Groin',
     difficulty: 'Beginner',
-    icon: 'fitness',
-    color: '#FF9800',
-    target: 'Groin area',
-    description: 'One of the most effective close-range self-defense moves.',
+    target: 'Groin',
+    icon: 'walk',
+    color: T.warning,
+    why: 'A correctly placed knee can disable an attacker for 5–10 seconds. That is your escape window.',
     steps: [
-      'If grabbed, grab the attacker\'s shoulders for balance',
-      'Shift your weight to one leg',
-      'Drive your knee upward with maximum force',
-      'Aim for the groin area',
-      'Strike multiple times if needed',
-      'Push attacker away and RUN immediately',
+      'Grab the attacker\'s shoulders or head for stability.',
+      'Drive the knee straight up into the groin.',
+      'Use your hips for power, not just the leg.',
+      'Push them away and run.',
     ],
-    tip: 'This works best when the attacker is very close to you. Use maximum force.',
   },
   {
-    id: '3',
-    title: 'Elbow Strike',
-    difficulty: 'Beginner',
-    icon: 'body',
-    color: '#F44336',
-    target: 'Face, temple, ribs',
-    description: 'Your elbow is one of the hardest parts of your body - use it!',
-    steps: [
-      'Bend your arm at a 90-degree angle',
-      'Rotate your body toward the attacker',
-      'Swing your bent arm horizontally',
-      'Strike with the point of your elbow',
-      'Aim for the face, temple, jaw, or ribs',
-      'Follow up with a knee strike if possible, then flee',
-    ],
-    tip: 'Elbow strikes work great in close quarters when you can\'t extend your arm for a punch.',
-  },
-  {
-    id: '4',
-    title: 'Wrist Escape',
-    difficulty: 'Intermediate',
-    icon: 'link',
-    color: '#9C27B0',
-    target: 'Breaking wrist grabs',
-    description: 'Escape when someone grabs your wrist tightly.',
-    steps: [
-      'Stay calm - don\'t pull away instinctively',
-      'Rotate your arm toward the attacker\'s thumb',
-      'The thumb is the weakest part of their grip',
-      'Yank your arm quickly through the gap between thumb and fingers',
-      'Step back immediately to create distance',
-      'Run to safety or use another strike if needed',
-    ],
-    tip: 'Always move toward the thumb side - it\'s the weakest link in any grip.',
-  },
-  {
-    id: '5',
-    title: 'Bear Hug Defense',
-    difficulty: 'Intermediate',
-    icon: 'shield',
-    color: '#2196F3',
-    target: 'Escaping from behind',
-    description: 'Escape when grabbed from behind in a bear hug.',
-    steps: [
-      'Lower your center of gravity by bending your knees',
-      'Shift your hips to one side',
-      'Strike backward with your elbow into attacker\'s ribs',
-      'Stomp down hard on attacker\'s foot with your heel',
-      'Turn your body to face the attacker',
-      'Strike with palm or knee and RUN immediately',
-    ],
-    tip: 'Making yourself heavier by dropping your weight makes it harder for them to hold you.',
-  },
-  {
-    id: '6',
-    title: 'Eye Gouge / Distraction',
-    difficulty: 'Advanced',
-    icon: 'eye',
-    color: '#FF5722',
+    id: 'eye-strike',
+    name: 'Eye Strike',
+    difficulty: 'Critical',
     target: 'Eyes',
-    description: 'Last resort technique for life-threatening situations only.',
+    icon: 'eye-off',
+    color: T.danger,
+    why: 'The most disabling target on the body. Even a graze causes involuntary tearing and panic.',
     steps: [
-      'ONLY use in life-threatening emergencies',
-      'Use your thumb or fingers',
-      'Push firmly toward the attacker\'s eyes',
-      'This will cause immediate pain and temporary blindness',
-      'Use the moment of distraction to break free',
-      'RUN and call for help immediately',
+      'Keep fingers slightly bent and stiff (not straight).',
+      'Aim with index and middle finger like a fork.',
+      'Strike or rake across the eyes.',
+      'Your goal is disruption, not injury — escape immediately after.',
     ],
-    tip: '⚠️ This is a last-resort move when your life is in danger. Always prioritize escape.',
   },
   {
-    id: '7',
-    title: 'Verbal Self-Defense',
+    id: 'wrist-escape',
+    name: 'Wrist Grab Escape',
     difficulty: 'Beginner',
-    icon: 'megaphone',
-    color: '#607D8B',
-    target: 'De-escalation',
-    description: 'Use your voice as your first line of defense.',
+    target: 'Self-defense',
+    icon: 'hand-left',
+    color: T.info,
+    why: 'When grabbed, never pull straight back — that\'s where they\'re strongest. Rotate against the thumb.',
     steps: [
-      'Stand tall with confident body language',
-      'Use a loud, firm voice - SHOUT "BACK OFF" or "STOP"',
-      'Make eye contact - don\'t look down',
-      'Set clear boundaries: "Do NOT come closer"',
-      'Draw attention from bystanders by yelling "FIRE!" or "HELP!"',
-      'If they don\'t stop, prepare your physical defense',
+      'Make a fist with the trapped hand.',
+      'Rotate your wrist toward the attacker\'s thumb.',
+      'Pull sharply through the gap their thumb leaves.',
+      'Counter-strike if possible, then run.',
     ],
-    tip: 'Yelling "FIRE" gets more attention than "Help" in public. Use it strategically.',
   },
   {
-    id: '8',
-    title: 'Bag / Object Defense',
-    difficulty: 'Beginner',
-    icon: 'bag-handle',
-    color: '#795548',
-    target: 'Using everyday objects',
-    description: 'Turn everyday objects into defensive tools.',
+    id: 'choke-defense',
+    name: 'Two-Hand Choke Defense',
+    difficulty: 'Intermediate',
+    target: 'Self-defense',
+    icon: 'shield',
+    color: T.accent,
+    why: 'A choke is a serious threat. You have ~10 seconds before vision narrows. Act fast.',
     steps: [
-      'Keys: Hold between fingers for striking',
-      'Bag: Swing heavy bag at attacker\'s head',
-      'Umbrella: Use as a jabbing weapon',
-      'Water bottle: Strike with the bottom',
-      'High heels: Use the heel as a striking point',
-      'Spray: Deodorant or perfume spray to the eyes',
+      'Tuck your chin to protect your throat.',
+      'Raise both arms straight up between attacker\'s arms.',
+      'Twist your body sharply to one side — this breaks the grip.',
+      'Counter with palm strike + knee, then escape.',
     ],
-    tip: 'Always be aware of objects around you that can be used for defense.',
+  },
+  {
+    id: 'ground-defense',
+    name: 'Ground Position Defense',
+    difficulty: 'Intermediate',
+    target: 'Self-defense',
+    icon: 'fitness',
+    color: T.info,
+    why: 'On your back, your legs are stronger than their arms. Use them as your primary weapon.',
+    steps: [
+      'Lay on your back, knees up, feet between you and attacker.',
+      'Kick at knees, shins, or groin — never let them inside your guard.',
+      'Roll to one side and push up to standing as soon as possible.',
+      'Run toward people, lights, or noise.',
+    ],
+  },
+  {
+    id: 'pen-weapon',
+    name: 'Pen as Weapon',
+    difficulty: 'Beginner',
+    target: 'Improvised',
+    icon: 'create',
+    color: '#FFB300',
+    why: 'You probably carry one daily. Held correctly, it strikes harder than a fist and is legal everywhere.',
+    steps: [
+      'Hold pen with thumb on the cap, point exposed past pinky.',
+      'Strike with downward stabbing motion.',
+      'Aim for soft tissue: throat, neck, ribs, hand.',
+      'Drop the pen and run if escape is possible.',
+    ],
   },
 ];
 
 export default function SelfDefenseScreen() {
   const navigation = useNavigation();
-  const [selectedTechnique, setSelectedTechnique] = useState(null);
-
-  if (selectedTechnique) {
-    const t = selectedTechnique;
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => setSelectedTechnique(null)} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.surface} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t.title}</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        <ScrollView contentContainerStyle={styles.detailContent}>
-          {/* Technique header */}
-          <View style={[styles.detailBanner, { backgroundColor: t.color + '15' }]}>
-            <Ionicons name={t.icon} size={50} color={t.color} />
-            <Text style={[styles.detailDifficulty, { color: t.color }]}>{t.difficulty}</Text>
-            <Text style={styles.detailTarget}>Target: {t.target}</Text>
-          </View>
-
-          <Text style={styles.detailDesc}>{t.description}</Text>
-
-          {/* Steps */}
-          <Text style={styles.stepsTitle}>Step-by-Step Guide</Text>
-          {t.steps.map((step, i) => (
-            <View key={i} style={styles.stepRow}>
-              <View style={[styles.stepNum, { backgroundColor: t.color }]}>
-                <Text style={styles.stepNumText}>{i + 1}</Text>
-              </View>
-              <Text style={styles.stepText}>{step}</Text>
-            </View>
-          ))}
-
-          {/* Tip */}
-          <View style={styles.tipCard}>
-            <Ionicons name="bulb" size={22} color="#FF8F00" />
-            <Text style={styles.tipText}>💡 {t.tip}</Text>
-          </View>
-
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      </View>
-    );
-  }
+  const [expanded, setExpanded] = useState(null);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.surface} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Self Defense</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <Screen>
+      <Header title="Self Defense" subtitle={`${TECHNIQUES.length} life-saving techniques`} onBack={() => navigation.goBack()} />
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.introText}>
-          🥊 Learn practical techniques to protect yourself. Remember: the goal is always to escape and get to safety.
-        </Text>
-
-        {TECHNIQUES.map((tech) => (
-          <TouchableOpacity
-            key={tech.id}
-            style={styles.techCard}
-            onPress={() => setSelectedTechnique(tech)}
-          >
-            <View style={[styles.techIcon, { backgroundColor: tech.color + '20' }]}>
-              <Ionicons name={tech.icon} size={28} color={tech.color} />
-            </View>
-            <View style={styles.techInfo}>
-              <Text style={styles.techTitle}>{tech.title}</Text>
-              <Text style={styles.techDesc} numberOfLines={1}>{tech.description}</Text>
-              <View style={styles.techMeta}>
-                <Text style={[styles.techDifficulty, { color: tech.color }]}>
-                  {tech.difficulty}
-                </Text>
-                <Text style={styles.techTarget}>→ {tech.target}</Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-        ))}
-
-        {/* Bottom reminder */}
-        <View style={styles.reminderCard}>
-          <Ionicons name="heart" size={24} color="#E91E63" />
-          <Text style={styles.reminderText}>
-            Your safety matters more than anything. Always trust your instincts.
-            If something feels wrong, leave immediately. No possession is worth your life.
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          <Ionicons name="information-circle" size={20} color={T.warning} style={{ marginTop: 2 }} />
+          <Text style={styles.disclaimer}>
+            These are last-resort moves. Your first goal is always to escape. If you can run, run.
+            Practice these slowly with a trusted partner before you ever need them.
           </Text>
         </View>
+      </Card>
 
-        <View style={{ height: 30 }} />
-      </ScrollView>
-    </View>
+      <SectionTitle>Techniques</SectionTitle>
+      {TECHNIQUES.map((t) => {
+        const open = expanded === t.id;
+        return (
+          <Card key={t.id} padded={false}>
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => { setExpanded(open ? null : t.id); Haptics.selectionAsync(); }}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.icon, { backgroundColor: `${t.color}22` }]}>
+                <Ionicons name={t.icon} size={20} color={t.color} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <Text style={styles.name}>{t.name}</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                  <View style={styles.metaPill}>
+                    <Text style={[styles.metaText, { color: t.difficulty === 'Critical' ? T.danger : T.textSub }]}>{t.difficulty}</Text>
+                  </View>
+                  <View style={styles.metaPill}>
+                    <Text style={styles.metaText}>{t.target}</Text>
+                  </View>
+                </View>
+              </View>
+              <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={T.textHint} />
+            </TouchableOpacity>
+
+            {open && (
+              <View style={styles.expanded}>
+                <Text style={styles.whyLabel}>WHY IT WORKS</Text>
+                <Text style={styles.whyText}>{t.why}</Text>
+
+                <Text style={[styles.whyLabel, { marginTop: 14 }]}>STEPS</Text>
+                {t.steps.map((step, i) => (
+                  <View key={i} style={styles.stepRow}>
+                    <View style={styles.stepNum}>
+                      <Text style={styles.stepNumText}>{i + 1}</Text>
+                    </View>
+                    <Text style={styles.stepText}>{step}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </Card>
+        );
+      })}
+
+      <View style={styles.footer}>
+        <Ionicons name="shield-checkmark" size={14} color={T.success} />
+        <Text style={styles.footerText}>You are stronger than you think.</Text>
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 48, paddingBottom: 18,
-    backgroundColor: COLORS.primaryDark,
-    borderBottomLeftRadius: 20, borderBottomRightRadius: 20,
-  },
-  backBtn: { padding: 8, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12 },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: COLORS.surface, letterSpacing: 0.3 },
-  content: { padding: 16 },
+  disclaimer: { color: T.textSub, fontSize: 12, lineHeight: 18, flex: 1 },
 
-  introText: {
-    fontSize: 14, color: COLORS.text, lineHeight: 21, marginBottom: 18,
-    backgroundColor: '#FFF3E0', padding: 16, borderRadius: 16,
-    borderLeftWidth: 4, borderLeftColor: '#FF9800',
-  },
+  row: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  icon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  name: { color: T.white, fontSize: 15, fontWeight: '800' },
 
-  // Tech cards
-  techCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface,
-    borderRadius: 18, padding: 16, marginBottom: 12, ...SHADOWS.small,
+  metaPill: {
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1, borderColor: T.border,
   },
-  techIcon: {
-    width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
-  },
-  techInfo: { flex: 1, marginLeft: 14 },
-  techTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
-  techDesc: { fontSize: 12, color: COLORS.textLight, marginTop: 2 },
-  techMeta: { flexDirection: 'row', marginTop: 6, alignItems: 'center' },
-  techDifficulty: { fontSize: 11, fontWeight: '700' },
-  techTarget: { fontSize: 11, color: COLORS.textLight, marginLeft: 10 },
+  metaText: { fontSize: 10, color: T.textSub, fontWeight: '700' },
 
-  // Detail view
-  detailContent: { padding: 16 },
-  detailBanner: {
-    borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16,
+  expanded: {
+    paddingHorizontal: 14, paddingBottom: 16,
+    borderTopWidth: 1, borderTopColor: T.border,
+    paddingTop: 14,
   },
-  detailDifficulty: { fontSize: 14, fontWeight: '700', marginTop: 10 },
-  detailTarget: { fontSize: 13, color: COLORS.textLight, marginTop: 4 },
-  detailDesc: { fontSize: 15, color: COLORS.text, lineHeight: 22, marginBottom: 20 },
-  stepsTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 14 },
-  stepRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14 },
+  whyLabel: { color: T.textHint, fontSize: 10, fontWeight: '900', letterSpacing: 1.2, marginBottom: 6 },
+  whyText:  { color: T.text, fontSize: 13, lineHeight: 19 },
+
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 10 },
   stepNum: {
-    width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
-    marginRight: 12,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: T.primaryGlow,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 1,
   },
-  stepNumText: { fontSize: 14, fontWeight: '800', color: '#FFF' },
-  stepText: { flex: 1, fontSize: 14, color: COLORS.text, lineHeight: 20, paddingTop: 4 },
+  stepNumText: { color: T.primary, fontSize: 12, fontWeight: '900' },
+  stepText: { flex: 1, color: T.text, fontSize: 13, marginLeft: 12, lineHeight: 19 },
 
-  tipCard: {
-    flexDirection: 'row', backgroundColor: '#FFF8E1', borderRadius: 12,
-    padding: 14, marginTop: 10, alignItems: 'flex-start',
-  },
-  tipText: { flex: 1, fontSize: 13, color: '#F57F17', marginLeft: 10, lineHeight: 18 },
-
-  reminderCard: {
-    flexDirection: 'row', backgroundColor: '#FCE4EC', borderRadius: 16,
-    padding: 16, marginTop: 8, alignItems: 'flex-start',
-  },
-  reminderText: { flex: 1, fontSize: 13, color: '#C62828', marginLeft: 12, lineHeight: 19 },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, marginBottom: 8 },
+  footerText: { color: T.textHint, fontSize: 11, fontStyle: 'italic' },
 });
